@@ -1,0 +1,18 @@
+{
+  "name": "simpler-peer",
+  "version": "1.0.0",
+  "description": "A fork of Feross's simple-peer that doesn't touch node streams or Buffer",
+  "scripts": {
+    "test": "zuul --ui tape --no-coverage --local 7357 ./test.js"
+  },
+  "dependencies": {
+    "get-browser-rtc": "^1.0.0",
+    "inherits": "^2.0.1"
+  },
+  "devDependencies": {
+    "tape": "^4.0.1",
+    "zuul": "^3.2.0"
+  },
+  "author": "jesse.tane@gmail.com",
+  "license": "ISC"
+}
