@@ -34,8 +34,7 @@ tape('connect', function (t) {
   })
 
   p2.on('datachannel', function (channel) {
-    t.equal(channel.label, 'default')
-    t.pass('p2 saw default channel open')
+    t.equal(channel.label, 'default', 'p2 saw default channel open')
   })
 })
 
@@ -113,8 +112,7 @@ tape('trickle connect', function (t) {
   })
 
   p2.on('datachannel', function (channel) {
-    t.equal(channel.label, 'default')
-    t.pass('p2 saw default channel open')
+    t.equal(channel.label, 'default', 'p2 saw default channel open')
   })
 })
 
