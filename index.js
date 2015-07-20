@@ -250,6 +250,8 @@ SimplerPeer.prototype._onDefaultChannelOpen = function () {
     return
   }
 
+  this.defaultChannel.on('close', this.close.bind(this))
+
   if (!this._didConnect && this.defaultChannel.readyState === 'open') {
     this._didConnect = true
     this.emit('connect')
