@@ -29,7 +29,7 @@ function DataChannel (channel) {
   }
 
   this._channel.onclose = function () {
-    self.emit('open')
+    self.emit('close')
   }
 }
 
