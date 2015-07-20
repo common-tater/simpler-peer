@@ -33,58 +33,24 @@ function DataChannel (channel) {
   }
 }
 
-Object.defineProperty(DataChannel.prototype, 'label', {
-  get: function () {
-    return this._channel.label
-  }
-})
+var readOnly = [
+  'label',
+  'ordered',
+  'maxPacketLifeTime',
+  'maxRetransmits',
+  'protocol',
+  'negotiated',
+  'id',
+  'readyState',
+  'bufferedAmount'
+]
 
-Object.defineProperty(DataChannel.prototype, 'ordered', {
-  get: function () {
-    return this._channel.ordered
-  }
-})
-
-Object.defineProperty(DataChannel.prototype, 'maxPacketLifeTime', {
-  get: function () {
-    return this._channel.maxPacketLifeTime
-  }
-})
-
-Object.defineProperty(DataChannel.prototype, 'maxRetransmits', {
-  get: function () {
-    return this._channel.maxRetransmits
-  }
-})
-
-Object.defineProperty(DataChannel.prototype, 'protocol', {
-  get: function () {
-    return this._channel.protocol
-  }
-})
-
-Object.defineProperty(DataChannel.prototype, 'negotiated', {
-  get: function () {
-    return this._channel.negotiated
-  }
-})
-
-Object.defineProperty(DataChannel.prototype, 'id', {
-  get: function () {
-    return this._channel.id
-  }
-})
-
-Object.defineProperty(DataChannel.prototype, 'readyState', {
-  get: function () {
-    return this._channel.readyState
-  }
-})
-
-Object.defineProperty(DataChannel.prototype, 'bufferedAmount', {
-  get: function () {
-    return this._channel.bufferedAmount
-  }
+readOnly.forEach(function (property) {
+  Object.defineProperty(DataChannel.prototype, property, {
+    get: function () {
+      return this._channel[property]
+    }
+  })
 })
 
 Object.defineProperty(DataChannel.prototype, 'binaryType', {
