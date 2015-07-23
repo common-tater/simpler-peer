@@ -65,7 +65,7 @@ SimplerPeer.prototype.createDataChannel = function (label, opts) {
 }
 
 SimplerPeer.prototype.signal = function (signal) {
-  if (this._didClose) {
+  if (this.closed) {
     this._onError(new Error('cannot signal after connection has closed'))
   }
 
@@ -91,8 +91,8 @@ SimplerPeer.prototype.signal = function (signal) {
 }
 
 SimplerPeer.prototype.close = function () {
-  if (!this._didClose) {
-    this._didClose = true
+  if (!this.closed) {
+    this.closed = true
     if (this.defaultChannel && this.defaultChannel.readyState === 'open') {
       this.defaultChannel.close()
     }
@@ -112,7 +112,7 @@ SimplerPeer.prototype._addIceCandidate = function (candidate) {
 }
 
 SimplerPeer.prototype._onCreateOffer = function (offer) {
-  if (this._didClose) {
+  if (this.closed) {
     return
   }
 
@@ -124,7 +124,7 @@ SimplerPeer.prototype._onCreateOffer = function (offer) {
     this._onError
   )
 
-  if (this._trickle || (this._didConnect && !this._didClose)) {
+  if (this._trickle || (this._didConnect && !this.closed)) {
     this._sendOffer()
   }
 }
@@ -141,7 +141,7 @@ SimplerPeer.prototype._sendOffer = function () {
 }
 
 SimplerPeer.prototype._onCreateAnswer = function (answer) {
-  if (this._didClose) {
+  if (this.closed) {
     return
   }
 
@@ -153,7 +153,7 @@ SimplerPeer.prototype._onCreateAnswer = function (answer) {
     this._onError
   )
 
-  if (this._trickle || (this._didConnect && !this._didClose)) {
+  if (this._trickle || (this._didConnect && !this.closed)) {
     this._sendAnswer()
   }
 }
@@ -170,7 +170,7 @@ SimplerPeer.prototype._sendAnswer = function () {
 }
 
 SimplerPeer.prototype._onSetRemoteDescription = function () {
-  if (this._didClose) {
+  if (this.closed) {
     return
   }
 
@@ -186,7 +186,7 @@ SimplerPeer.prototype._onSetRemoteDescription = function () {
 }
 
 SimplerPeer.prototype._onDataChannel = function (evt) {
-  if (this._didClose) {
+  if (this.closed) {
     return
   }
 
@@ -201,7 +201,7 @@ SimplerPeer.prototype._onDataChannel = function (evt) {
 }
 
 SimplerPeer.prototype._onIceCandidate = function (evt) {
-  if (this._didClose) {
+  if (this.closed) {
     return
   }
 
@@ -227,7 +227,7 @@ SimplerPeer.prototype._onIceCandidate = function (evt) {
 }
 
 SimplerPeer.prototype._onIceConnectionStateChange = function (evt) {
-  if (this._didClose) {
+  if (this.closed) {
     return
   }
 
@@ -246,7 +246,7 @@ SimplerPeer.prototype._onIceConnectionStateChange = function (evt) {
 }
 
 SimplerPeer.prototype._onDefaultChannelOpen = function () {
-  if (this._didClose) {
+  if (this.closed) {
     return
   }
 
