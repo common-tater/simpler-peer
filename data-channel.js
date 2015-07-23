@@ -11,6 +11,7 @@ function DataChannel (channel) {
   }
 
   this._channel = channel
+  this._channel.binaryType = 'arraybuffer'
 
   EventEmitter.call(this)
 
