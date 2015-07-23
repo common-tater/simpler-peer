@@ -124,12 +124,18 @@ SimplerPeer.prototype._onCreateOffer = function (offer) {
     this._onError
   )
 
-  if (this._trickle || (this._didConnect && !this.closed)) {
+  if (this._trickle) {
     this._sendOffer()
   }
 }
 
 SimplerPeer.prototype._sendOffer = function () {
+  if (this._didSendOffer) {
+    return
+  } else {
+    this._didSendOffer = true
+  }
+
   var signal = this.connection.localDescription || this._offer
 
   delete this._offer
@@ -153,12 +159,18 @@ SimplerPeer.prototype._onCreateAnswer = function (answer) {
     this._onError
   )
 
-  if (this._trickle || (this._didConnect && !this.closed)) {
+  if (this._trickle) {
     this._sendAnswer()
   }
 }
 
 SimplerPeer.prototype._sendAnswer = function () {
+  if (this._didSendAnswer) {
+    return
+  } else {
+    this._didSendAnswer = true
+  }
+
   var signal = this.connection.localDescription || this._answer
 
   delete this._answer
@@ -216,12 +228,11 @@ SimplerPeer.prototype._onIceCandidate = function (evt) {
       })
     }
   } else {
+    clearTimeout(this._iceGatheringTimeout)
     if (!evt.candidate) {
-      if (this._initiator) {
-        this._sendOffer()
-      } else {
-        this._sendAnswer()
-      }
+      this._onIceComplete()
+    } else {
+      this._iceGatheringTimeout = setTimeout(this._onIceComplete.bind(this), 250)
     }
   }
 }
@@ -235,13 +246,20 @@ SimplerPeer.prototype._onIceConnectionStateChange = function (evt) {
 
   if (this.state === 'connected' ||
       this.state === 'completed') {
-    if (!this._didConnect && this.defaultChannel && this.defaultChannel.readyState === 'open') {
-      this._didConnect = true
-      this.emit('connect')
-    }
+    this._onIceComplete()
+    this._maybeConnect()
   } else if (this.state === 'disconnected' ||
+             this.state === 'failed' ||
              this.state === 'closed') {
     this.close()
+  }
+}
+
+SimplerPeer.prototype._onIceComplete = function () {
+  if (this._initiator) {
+    this._sendOffer()
+  } else {
+    this._sendAnswer()
   }
 }
 
@@ -251,9 +269,12 @@ SimplerPeer.prototype._onDefaultChannelOpen = function () {
   }
 
   this.defaultChannel.on('close', this.close.bind(this))
+  this._maybeConnect()
+}
 
-  if (!this._didConnect && this.defaultChannel.readyState === 'open') {
-    this._didConnect = true
+SimplerPeer.prototype._maybeConnect = function () {
+  if (this.defaultChannel && this.defaultChannel.readyState === 'open') {
+    this._maybeConnect = noop
     this.emit('connect')
   }
 }
