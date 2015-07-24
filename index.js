@@ -93,10 +93,15 @@ SimplerPeer.prototype.signal = function (signal) {
 SimplerPeer.prototype.close = function () {
   if (!this.closed) {
     this.closed = true
-    if (this.defaultChannel && this.defaultChannel.readyState === 'open') {
+
+    try {
       this.defaultChannel.close()
-    }
-    this.connection.close()
+    } catch () {}
+
+    try {
+      this.connection.close()
+    } catch () {}
+
     this.emit('close')
   }
 }
