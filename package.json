@@ -3,7 +3,7 @@
   "version": "1.1.2",
   "description": "A fork of Feross's simple-peer that doesn't touch node streams or Buffer",
   "scripts": {
-    "test": "zuul --ui tape --no-coverage --local 7357 ./test.js"
+    "test": "standard && zuul --ui tape --no-coverage --local 7357 ./test.js"
   },
   "dependencies": {
     "get-browser-rtc": "^1.0.0",

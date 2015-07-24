@@ -4,9 +4,6 @@ var tape = require('tape')
 var p1 = null
 var p2 = null
 
-var p1Channel = null
-var p2Channel = null
-
 tape('connect', function (t) {
   t.plan(3)
 
@@ -16,7 +13,7 @@ tape('connect', function (t) {
   p1.on('signal', function (signal) {
     p2.signal(signal)
   })
-  
+
   p2.on('signal', function (signal) {
     p1.signal(signal)
   })

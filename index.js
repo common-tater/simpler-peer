@@ -96,11 +96,11 @@ SimplerPeer.prototype.close = function () {
 
     try {
       this.defaultChannel.close()
-    } catch () {}
+    } catch (err) {}
 
     try {
       this.connection.close()
-    } catch () {}
+    } catch (err) {}
 
     this.emit('close')
   }
