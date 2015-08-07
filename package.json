@@ -1,6 +1,6 @@
 {
   "name": "simpler-peer",
-  "version": "1.1.3",
+  "version": "1.2.0",
   "description": "A fork of Feross's simple-peer that doesn't touch node streams or Buffer",
   "scripts": {
     "test": "standard && zuul --ui tape --no-coverage --local 7357 ./test.js"
