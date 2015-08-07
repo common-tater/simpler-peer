@@ -31,7 +31,8 @@ function SimplerPeer (opts) {
   this._initiator = opts.initiator
   this._defaultChannelConfig = opts.channelConfig
   this._trickle = opts.trickle !== undefined ? opts.trickle : true
-  this._candidates = []
+  this._remoteCandidates = []
+  this._localCandidates = []
 
   this._onSetRemoteDescription = this._onSetRemoteDescription.bind(this)
   this._onCreateOffer = this._onCreateOffer.bind(this)
@@ -85,7 +86,7 @@ SimplerPeer.prototype.signal = function (signal) {
     if (this.connection.remoteDescription) {
       this._addIceCandidate(signal.candidate)
     } else {
-      this._candidates.push(signal.candidate)
+      this._remoteCandidates.push(signal.candidate)
     }
   }
 }
@@ -141,13 +142,13 @@ SimplerPeer.prototype._sendOffer = function () {
     this._didSendOffer = true
   }
 
-  var signal = this.connection.localDescription || this._offer
+  var sdp = this._constructSDP(this._offer.sdp)
 
   delete this._offer
 
   this.emit('signal', {
-    type: signal.type,
-    sdp: signal.sdp
+    type: 'offer',
+    sdp: sdp
   })
 }
 
@@ -176,14 +177,24 @@ SimplerPeer.prototype._sendAnswer = function () {
     this._didSendAnswer = true
   }
 
-  var signal = this.connection.localDescription || this._answer
+  var sdp = this._constructSDP(this._answer.sdp)
 
   delete this._answer
 
   this.emit('signal', {
-    type: signal.type,
-    sdp: signal.sdp
+    type: 'answer',
+    sdp: sdp
   })
+}
+
+SimplerPeer.prototype._constructSDP = function (sdp) {
+  for (var i in this._localCandidates) {
+    sdp += 'a=' + this._localCandidates[i].candidate + '\n'
+  }
+
+  delete this._localCandidates
+
+  return sdp
 }
 
 SimplerPeer.prototype._onSetRemoteDescription = function () {
@@ -198,8 +209,8 @@ SimplerPeer.prototype._onSetRemoteDescription = function () {
     )
   }
 
-  this._candidates.forEach(this._addIceCandidate.bind(this))
-  this._candidates = []
+  this._remoteCandidates.forEach(this._addIceCandidate.bind(this))
+  delete this._remoteCandidates
 }
 
 SimplerPeer.prototype._onDataChannel = function (evt) {
@@ -237,6 +248,7 @@ SimplerPeer.prototype._onIceCandidate = function (evt) {
     if (!evt.candidate) {
       this._onIceComplete()
     } else {
+      this._localCandidates.push(evt.candidate)
       this._iceGatheringTimeout = setTimeout(this._onIceComplete.bind(this), 250)
     }
   }
@@ -261,6 +273,8 @@ SimplerPeer.prototype._onIceConnectionStateChange = function (evt) {
 }
 
 SimplerPeer.prototype._onIceComplete = function () {
+  this.connection.onicecandidate = null
+
   if (this._initiator) {
     this._sendOffer()
   } else {
