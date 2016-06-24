@@ -6,7 +6,7 @@
     "test": "standard && zuul --ui tape --no-coverage --local 7357 ./test.js"
   },
   "dependencies": {
-    "get-browser-rtc": "^1.0.0",
+    "get-browser-rtc": "^1.0.2",
     "inherits": "^2.0.1"
   },
   "devDependencies": {
