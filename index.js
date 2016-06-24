@@ -99,21 +99,20 @@ SimplerPeer.prototype.signal = function (signal) {
 }
 
 SimplerPeer.prototype.close = function () {
-  if (!this.closed) {
-    this.closed = true
+  if (this.closed) return
+  this.closed = true
 
-    debug(this.id, 'close')
+  debug(this.id, 'close')
 
-    try {
-      this.defaultChannel.close()
-    } catch (err) {}
+  try {
+    this.defaultChannel.close()
+  } catch (err) {}
 
-    try {
-      this.connection.close()
-    } catch (err) {}
+  try {
+    this.connection.close()
+  } catch (err) {}
 
-    this.emit('close')
-  }
+  this.emit('close')
 }
 
 // private API below
