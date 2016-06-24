@@ -31,12 +31,12 @@ function SimplerPeer (opts) {
   this._initiator = opts.initiator
   this._defaultChannelConfig = opts.channelConfig
   this._trickle = opts.trickle !== undefined ? opts.trickle : true
-  this._remoteCandidates = []
-  this._localCandidates = []
 
   this._onSetRemoteDescription = this._onSetRemoteDescription.bind(this)
   this._onCreateOffer = this._onCreateOffer.bind(this)
   this._onCreateAnswer = this._onCreateAnswer.bind(this)
+  this._sendOffer = this._sendOffer.bind(this)
+  this._sendAnswer = this._sendAnswer.bind(this)
   this._onDefaultChannelOpen = this._onDefaultChannelOpen.bind(this)
   this._onError = this._onError.bind(this)
 
@@ -88,13 +88,7 @@ SimplerPeer.prototype.signal = function (signal) {
   }
 
   if (signal.candidate) {
-    if (this.connection.remoteDescription) {
-      this._addIceCandidate(signal.candidate)
-    } else {
-      debug(this.id, 'this._remoteCandidates.push', signal)
-
-      this._remoteCandidates.push(signal.candidate)
-    }
+    this._addIceCandidate(signal.candidate)
   }
 }
 
@@ -134,17 +128,11 @@ SimplerPeer.prototype._onCreateOffer = function (offer) {
 
   debug(this.id, 'onCreateOffer', offer)
 
-  this._offer = offer
-
   this.connection.setLocalDescription(
     offer,
-    noop,
+    this._trickle ? this._sendOffer : noop,
     this._onError
   )
-
-  if (this._trickle) {
-    this._sendOffer()
-  }
 }
 
 SimplerPeer.prototype._sendOffer = function () {
@@ -154,16 +142,11 @@ SimplerPeer.prototype._sendOffer = function () {
     this._didSendOffer = true
   }
 
-  var sdp = this._constructSDP(this._offer.sdp)
+  var signal = this.connection.localDescription
 
-  delete this._offer
+  debug(this.id, 'sendOffer', signal)
 
-  debug(this.id, 'sendOffer', sdp)
-
-  this.emit('signal', {
-    type: 'offer',
-    sdp: sdp
-  })
+  this.emit('signal', signal)
 }
 
 SimplerPeer.prototype._onCreateAnswer = function (answer) {
@@ -173,17 +156,11 @@ SimplerPeer.prototype._onCreateAnswer = function (answer) {
 
   debug(this.id, 'onCreateAnswer', answer)
 
-  this._answer = answer
-
   this.connection.setLocalDescription(
     answer,
-    noop,
+    this._trickle ? this._sendAnswer : noop,
     this._onError
   )
-
-  if (this._trickle) {
-    this._sendAnswer()
-  }
 }
 
 SimplerPeer.prototype._sendAnswer = function () {
@@ -193,26 +170,11 @@ SimplerPeer.prototype._sendAnswer = function () {
     this._didSendAnswer = true
   }
 
-  var sdp = this._constructSDP(this._answer.sdp)
+  var signal = this.connection.localDescription
 
-  delete this._answer
+  debug(this.id, 'sendAnswer', signal)
 
-  debug(this.id, 'sendAnswer', sdp)
-
-  this.emit('signal', {
-    type: 'answer',
-    sdp: sdp
-  })
-}
-
-SimplerPeer.prototype._constructSDP = function (sdp) {
-  for (var i in this._localCandidates) {
-    sdp += 'a=' + this._localCandidates[i].candidate + '\n'
-  }
-
-  delete this._localCandidates
-
-  return sdp
+  this.emit('signal', signal)
 }
 
 SimplerPeer.prototype._onSetRemoteDescription = function () {
@@ -228,9 +190,6 @@ SimplerPeer.prototype._onSetRemoteDescription = function () {
       this._onError
     )
   }
-
-  this._remoteCandidates.forEach(this._addIceCandidate.bind(this))
-  delete this._remoteCandidates
 }
 
 SimplerPeer.prototype._onDataChannel = function (evt) {
@@ -259,20 +218,13 @@ SimplerPeer.prototype._onIceCandidate = function (evt) {
 
   if (this._trickle) {
     if (evt.candidate) {
-      this.emit('signal', {
-        candidate: {
-          candidate: evt.candidate.candidate,
-          sdpMLineIndex: evt.candidate.sdpMLineIndex,
-          sdpMid: evt.candidate.sdpMid
-        }
-      })
+      this.emit('signal', evt)
     }
   } else {
     clearTimeout(this._iceGatheringTimeout)
     if (!evt.candidate) {
       this._onIceComplete()
     } else {
-      this._localCandidates.push(evt.candidate)
       this._iceGatheringTimeout = setTimeout(this._onIceComplete.bind(this), 250)
     }
   }
