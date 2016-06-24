@@ -45,6 +45,11 @@ function SimplerPeer (opts) {
   this.connection.ondatachannel = this._onDataChannel.bind(this)
   this.connection.onicecandidate = this._onIceCandidate.bind(this)
   this.connection.oniceconnectionstatechange = this._onIceConnectionStateChange.bind(this)
+  this.connection.onaddstream = this._onaddStream.bind(this)
+
+  if (opts.stream) {
+    this.connection.addStream(opts.stream)
+  }
 
   if (this._initiator) {
     this.defaultChannel = this.createDataChannel('default')
@@ -190,6 +195,16 @@ SimplerPeer.prototype._onSetRemoteDescription = function () {
       this._onError
     )
   }
+}
+
+SimplerPeer.prototype._onaddStream = function (evt) {
+  if (this.closed) {
+    return
+  }
+
+  debug(this.id, 'onaddStream', evt.stream)
+
+  this.emit('stream', evt.stream)
 }
 
 SimplerPeer.prototype._onDataChannel = function (evt) {
