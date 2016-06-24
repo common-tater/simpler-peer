@@ -40,6 +40,7 @@ function SimplerPeer (opts) {
   this._onDefaultChannelOpen = this._onDefaultChannelOpen.bind(this)
   this._onError = this._onError.bind(this)
 
+  this.id = opts.id || (Math.random() + '').slice(2)
   this.connection = new webrtc.RTCPeerConnection(opts.config)
   this.connection.ondatachannel = this._onDataChannel.bind(this)
   this.connection.onicecandidate = this._onIceCandidate.bind(this)
