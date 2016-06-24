@@ -63,6 +63,8 @@ Object.defineProperty(SimplerPeer.prototype, 'state', {
 })
 
 SimplerPeer.prototype.createDataChannel = function (label, opts) {
+  debug(this.id, 'createDataChannel', label)
+
   return new DataChannel(this.connection.createDataChannel(label, opts || this._defaultChannelConfig))
 }
 
@@ -76,6 +78,8 @@ SimplerPeer.prototype.signal = function (signal) {
   }
 
   if (signal.sdp) {
+    debug(this.id, 'setRemoteDescription', signal)
+
     this.connection.setRemoteDescription(
       new webrtc.RTCSessionDescription(signal),
       this._onSetRemoteDescription,
@@ -87,6 +91,8 @@ SimplerPeer.prototype.signal = function (signal) {
     if (this.connection.remoteDescription) {
       this._addIceCandidate(signal.candidate)
     } else {
+      debug(this.id, 'this._remoteCandidates.push', signal)
+
       this._remoteCandidates.push(signal.candidate)
     }
   }
@@ -95,6 +101,8 @@ SimplerPeer.prototype.signal = function (signal) {
 SimplerPeer.prototype.close = function () {
   if (!this.closed) {
     this.closed = true
+
+    debug(this.id, 'close')
 
     try {
       this.defaultChannel.close()
@@ -111,6 +119,8 @@ SimplerPeer.prototype.close = function () {
 // private API below
 
 SimplerPeer.prototype._addIceCandidate = function (candidate) {
+  debug(this.id, 'addIceCandidate', candidate)
+
   this.connection.addIceCandidate(
     new webrtc.RTCIceCandidate(candidate),
     noop,
@@ -122,6 +132,8 @@ SimplerPeer.prototype._onCreateOffer = function (offer) {
   if (this.closed) {
     return
   }
+
+  debug(this.id, 'onCreateOffer', offer)
 
   this._offer = offer
 
@@ -147,6 +159,8 @@ SimplerPeer.prototype._sendOffer = function () {
 
   delete this._offer
 
+  debug(this.id, 'sendOffer', sdp)
+
   this.emit('signal', {
     type: 'offer',
     sdp: sdp
@@ -157,6 +171,8 @@ SimplerPeer.prototype._onCreateAnswer = function (answer) {
   if (this.closed) {
     return
   }
+
+  debug(this.id, 'onCreateAnswer', answer)
 
   this._answer = answer
 
@@ -182,6 +198,8 @@ SimplerPeer.prototype._sendAnswer = function () {
 
   delete this._answer
 
+  debug(this.id, 'sendAnswer', sdp)
+
   this.emit('signal', {
     type: 'answer',
     sdp: sdp
@@ -202,6 +220,8 @@ SimplerPeer.prototype._onSetRemoteDescription = function () {
   if (this.closed) {
     return
   }
+
+  debug(this.id, 'onSetRemoteDescription')
 
   if (this.connection.remoteDescription.type === 'offer') {
     this.connection.createAnswer(
@@ -226,6 +246,8 @@ SimplerPeer.prototype._onDataChannel = function (evt) {
     this.defaultChannel.once('open', this._onDefaultChannelOpen)
   }
 
+  debug(this.id, 'onDataChannel', channel)
+
   this.emit('datachannel', channel)
 }
 
@@ -233,6 +255,8 @@ SimplerPeer.prototype._onIceCandidate = function (evt) {
   if (this.closed) {
     return
   }
+
+  debug(this.id, 'onIceCandidate', evt)
 
   if (this._trickle) {
     if (evt.candidate) {
@@ -260,6 +284,8 @@ SimplerPeer.prototype._onIceConnectionStateChange = function (evt) {
     return
   }
 
+  debug(this.id, 'statechange', this.state)
+
   this.emit('statechange', this.state)
 
   if (this.state === 'connected' ||
@@ -276,6 +302,8 @@ SimplerPeer.prototype._onIceConnectionStateChange = function (evt) {
 SimplerPeer.prototype._onIceComplete = function () {
   this.connection.onicecandidate = null
 
+  debug(this.id, 'onIceComplete')
+
   if (this._initiator) {
     this._sendOffer()
   } else {
@@ -288,6 +316,8 @@ SimplerPeer.prototype._onDefaultChannelOpen = function () {
     return
   }
 
+  debug(this.id, 'onDefaultChannelOpen')
+
   this.defaultChannel.on('close', this.close.bind(this))
   this._maybeConnect()
 }
@@ -295,12 +325,19 @@ SimplerPeer.prototype._onDefaultChannelOpen = function () {
 SimplerPeer.prototype._maybeConnect = function () {
   if (this.defaultChannel && this.defaultChannel.readyState === 'open') {
     this._maybeConnect = noop
+
+    debug(this.id, 'connect')
+
     this.emit('connect')
   }
 }
 
 SimplerPeer.prototype._onError = function (err) {
   this.emit('error', err)
+}
+
+function debug () {
+  console.log.apply(console, arguments)
 }
 
 function noop () {}
