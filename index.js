@@ -303,7 +303,7 @@ SimplerPeer.prototype._onError = function (err) {
 }
 
 function debug () {
-  console.log.apply(console, arguments)
+  // console.log.apply(console, arguments)
 }
 
 function noop () {}
