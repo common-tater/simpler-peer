@@ -173,6 +173,53 @@ tape('renegotiation triggered by addStream', function (t) {
   }
 })
 
+tape('renegotiation triggered by removeStream', function (t) {
+  t.plan(4)
+
+  p1 = new SimplerPeer({ initiator: true })
+  p2 = new SimplerPeer()
+
+  p1.on('signal', function (signal) {
+    p2.signal(signal)
+  })
+
+  p2.on('signal', function (signal) {
+    p1.signal(signal)
+  })
+
+  p1.on('connect', function () {
+    t.pass('p1 connected')
+    connect()
+  })
+
+  p2.on('connect', function () {
+    t.pass('p2 connected')
+    connect()
+  })
+
+  var n = 2
+  function connect () {
+    if (--n !== 0) return
+
+    var ctx = new AudioContext()
+
+    p2.on('stream', function (stream) {
+      t.ok(stream)
+      stream.onended = removeStream
+      p1.removeStream(stream1)
+    })
+
+    var stream1 = ctx.createMediaStreamDestination().stream
+    p1.addStream(stream1)
+  }
+
+  function removeStream () {
+    t.pass()
+    p1.close()
+    p2.close()
+  }
+})
+
 tape('renegotiation only uses the latest of multiple offers', function (t) {
   t.plan(3)
 
