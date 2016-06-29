@@ -118,3 +118,112 @@ tape('close without trickle', function (t) {
   p1.close()
   p2.close()
 })
+
+tape('renegotiation triggered by addStream', function (t) {
+  t.plan(4)
+
+  p1 = new SimplerPeer({ id: 'p1', initiator: true })
+  p2 = new SimplerPeer({ id: 'p2' })
+
+  p1.on('signal', function (signal) {
+    p2.signal(signal)
+  })
+
+  p2.on('signal', function (signal) {
+    p1.signal(signal)
+  })
+
+  p1.on('connect', function () {
+    t.pass('p1 connected')
+    connect()
+  })
+
+  p2.on('connect', function () {
+    t.pass('p2 connected')
+    connect()
+  })
+
+  var n = 2
+  function connect () {
+    if (--n !== 0) return
+
+    var ctx = new AudioContext()
+
+    var stream1 = ctx.createMediaStreamDestination().stream
+    p1.on('stream', function (stream) {
+      t.ok(stream)
+      addStream()
+    })
+
+    var stream2 = ctx.createMediaStreamDestination().stream
+    p2.on('stream', function (stream) {
+      t.ok(stream)
+      addStream()
+    })
+
+    p1.addStream(stream1)
+    p2.addStream(stream2)
+  }
+
+  var o = 2
+  function addStream () {
+    if (--o !== 0) return
+    p1.close()
+    p2.close()
+  }
+})
+
+tape('renegotiation only uses the latest of multiple offers', function (t) {
+  t.plan(3)
+
+  p1 = new SimplerPeer({ initiator: true })
+  p2 = new SimplerPeer()
+
+  p1.on('signal', function (signal) {
+    p2.signal(signal)
+  })
+
+  p2.on('signal', function (signal) {
+    p1.signal(signal)
+  })
+
+  p1.on('connect', function () {
+    t.pass('p1 connected')
+    connect()
+  })
+
+  p2.on('connect', function () {
+    t.pass('p2 connected')
+    connect()
+  })
+
+  var n = 2
+  function connect () {
+    if (--n !== 0) return
+
+    var ctx = new AudioContext()
+
+    var stream1 = ctx.createMediaStreamDestination().stream
+    p1.on('stream', function (stream) {
+      t.ok(stream)
+      addStream()
+    })
+
+    var stream2 = ctx.createMediaStreamDestination().stream
+    p2.on('stream', function (stream) {
+      t.fail()
+    })
+
+    p1.addStream(stream1)
+    p2.addStream(stream2)
+
+    // this will cause p2 to get multiple offers
+    // before setting localDescription
+    p1.removeStream(stream1)
+  }
+
+  function addStream () {
+    p1.close()
+    p2.close()
+  }
+})
