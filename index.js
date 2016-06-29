@@ -4,7 +4,7 @@ var webrtc = require('get-browser-rtc')()
 var inherits = require('inherits')
 var EventEmitter = require('events').EventEmitter
 var DataChannel = require('./data-channel')
-var sessionIdRegex = /o=- ([^ ]*)/
+var sessionVersionRegex = /\no=- [^ ]* ([^ ]*)/
 
 inherits(SimplerPeer, EventEmitter)
 
@@ -170,6 +170,12 @@ SimplerPeer.prototype._processRemoteOffer = function (offer) {
 }
 
 SimplerPeer.prototype._processRemoteAnswer = function (answer) {
+  var remoteSessionVersion = answer.sdp.match(sessionVersionRegex)[1]
+  var localSessionVersion = this._localOffer.sdp.match(sessionVersionRegex)[1]
+  if (remoteSessionVersion !== localSessionVersion) {
+    return
+  }
+
   debug(this.id, 'got answer', answer)
 
   this._remoteAnswer = new webrtc.RTCSessionDescription(answer)
@@ -198,9 +204,9 @@ SimplerPeer.prototype._processRemoteIceCandidate = function (candidate) {
 }
 
 SimplerPeer.prototype._hasLatestOffer = function () {
-  var latestSessionId = this._remoteOffer.sdp.match(sessionIdRegex)[1]
-  var currentSessionId = this.connection.remoteDescription.sdp.match(sessionIdRegex)[1]
-  if (latestSessionId === currentSessionId) {
+  var latestSessionVersion = this._remoteOffer.sdp.match(sessionVersionRegex)[1]
+  var currentSessionVersion = this.connection.remoteDescription.sdp.match(sessionVersionRegex)[1]
+  if (latestSessionVersion === currentSessionVersion) {
     return true
   }
 
