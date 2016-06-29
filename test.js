@@ -74,7 +74,7 @@ tape('close', function (t) {
   p2.close()
 })
 
-tape('trickle connect', function (t) {
+tape('connect without trickle ice', function (t) {
   t.plan(4)
 
   p1 = new SimplerPeer({ initiator: true, trickle: false })
@@ -104,7 +104,7 @@ tape('trickle connect', function (t) {
   })
 })
 
-tape('trickle close', function (t) {
+tape('close without trickle', function (t) {
   t.plan(2)
 
   p1.on('close', function () {
