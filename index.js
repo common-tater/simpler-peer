@@ -4,6 +4,7 @@ var webrtc = require('get-browser-rtc')()
 var inherits = require('inherits')
 var EventEmitter = require('events').EventEmitter
 var DataChannel = require('./data-channel')
+var sessionIdRegex = /o=- ([^ ]*)/
 
 inherits(SimplerPeer, EventEmitter)
 
@@ -32,11 +33,11 @@ function SimplerPeer (opts) {
   this._trickle = opts.trickle !== undefined ? opts.trickle : true
 
   this._onSetRemoteDescription = this._onSetRemoteDescription.bind(this)
+  this._onSetLocalDescription = this._onSetLocalDescription.bind(this)
   this._onCreateOffer = this._onCreateOffer.bind(this)
   this._onCreateAnswer = this._onCreateAnswer.bind(this)
-  this._sendOffer = this._sendOffer.bind(this)
-  this._sendAnswer = this._sendAnswer.bind(this)
   this._onChannelOpen = this._onChannelOpen.bind(this)
+  this._onChannelMessage = this._onChannelMessage.bind(this)
   this._onError = this._onError.bind(this)
 
   this.id = opts.id || (Math.random() + '').slice(2)
@@ -45,6 +46,7 @@ function SimplerPeer (opts) {
   this.connection.onicecandidate = this._onIceCandidate.bind(this)
   this.connection.oniceconnectionstatechange = this._onIceConnectionStateChange.bind(this)
   this.connection.onaddstream = this._onaddStream.bind(this)
+  this.connection.onnegotiationneeded = this._onNegotiationNeeded.bind(this)
 
   if (opts.stream) {
     this.connection.addStream(opts.stream)
@@ -53,23 +55,7 @@ function SimplerPeer (opts) {
   if (this._initiator) {
     this._channel = this.createDataChannel('internal')
     this._channel.once('open', this._onChannelOpen)
-    this.connection.createOffer(
-      this._onCreateOffer,
-      this._onError
-    )
   }
-}
-
-Object.defineProperty(SimplerPeer.prototype, 'state', {
-  get: function () {
-    return this.connection.iceConnectionState
-  }
-})
-
-SimplerPeer.prototype.createDataChannel = function (label, opts) {
-  debug(this.id, 'createDataChannel', label)
-
-  return new DataChannel(this.connection.createDataChannel(label, opts))
 }
 
 SimplerPeer.prototype.signal = function (signal) {
@@ -82,23 +68,34 @@ SimplerPeer.prototype.signal = function (signal) {
   }
 
   if (signal.sdp) {
-    debug(this.id, 'setRemoteDescription', signal)
-
-    this.connection.setRemoteDescription(
-      new webrtc.RTCSessionDescription(signal),
-      this._onSetRemoteDescription,
-      this._onError
-    )
+    this._processRemoteSessionDescription(signal)
+  } else if (signal.candidate) {
+    this._processRemoteIceCandidate(signal.candidate)
   }
+}
 
-  if (signal.candidate) {
-    this._addIceCandidate(signal.candidate)
-  }
+SimplerPeer.prototype.createDataChannel = function (label, opts) {
+  debug(this.id, 'createDataChannel', label)
+
+  return new DataChannel(this.connection.createDataChannel(label, opts))
+}
+
+SimplerPeer.prototype.addStream = function (stream) {
+  debug(this.id, 'addStream', stream)
+
+  this.connection.addStream(stream)
+}
+
+SimplerPeer.prototype.removeStream = function (stream) {
+  debug(this.id, 'removeStream', stream)
+
+  this.connection.removeStream(stream)
 }
 
 SimplerPeer.prototype.close = function () {
   if (this.closed) return
   this.closed = true
+  this.connected = false
 
   debug(this.id, 'close')
 
@@ -115,8 +112,83 @@ SimplerPeer.prototype.close = function () {
 
 // private API below
 
-SimplerPeer.prototype._addIceCandidate = function (candidate) {
-  debug(this.id, 'addIceCandidate', candidate)
+SimplerPeer.prototype._onNegotiationNeeded = function () {
+  debug(this.id, 'onNegotiationNeeded')
+
+  this.emit('negotiationneeded')
+
+  delete this._localOffer
+  this.connection.createOffer(
+    this._onCreateOffer,
+    this._onError
+  )
+}
+
+SimplerPeer.prototype._onCreateOffer = function (offer) {
+  if (this.closed) return
+
+  debug(this.id, 'onCreateOffer', offer)
+
+  this._localOffer = offer
+
+  if (this.connected) {
+    this._channel.send(
+      JSON.stringify(offer)
+    )
+  } else {
+    this.connection.setLocalDescription(
+      offer,
+      this._onSetLocalDescription,
+      this._onError
+    )
+  }
+}
+
+SimplerPeer.prototype._processRemoteSessionDescription = function (signal) {
+  if (signal.type === 'offer') {
+    this._processRemoteOffer(signal)
+  } else if (signal.type === 'answer' && this._localOffer) {
+    this._processRemoteAnswer(signal)
+  }
+}
+
+SimplerPeer.prototype._processRemoteOffer = function (offer) {
+  debug(this.id, 'got offer', offer)
+
+  if (this._remoteOffer) {
+    this._remoteOffer = offer
+    return
+  } else {
+    this._remoteOffer = offer
+  }
+
+  this.connection.setRemoteDescription(
+    new webrtc.RTCSessionDescription(offer),
+    this._onSetRemoteDescription,
+    this._onError
+  )
+}
+
+SimplerPeer.prototype._processRemoteAnswer = function (answer) {
+  debug(this.id, 'got answer', answer)
+
+  this._remoteAnswer = new webrtc.RTCSessionDescription(answer)
+  var offer = this._localOffer
+  delete this._localOffer
+
+  if (this.connected) {
+    this.connection.setLocalDescription(
+      offer,
+      this._onSetLocalDescription,
+      this._onError
+    )
+  } else {
+    this._onSetLocalDescription()
+  }
+}
+
+SimplerPeer.prototype._processRemoteIceCandidate = function (candidate) {
+  debug(this.id, 'got candidate', candidate)
 
   this.connection.addIceCandidate(
     new webrtc.RTCIceCandidate(candidate),
@@ -125,109 +197,72 @@ SimplerPeer.prototype._addIceCandidate = function (candidate) {
   )
 }
 
-SimplerPeer.prototype._onCreateOffer = function (offer) {
-  if (this.closed) {
-    return
+SimplerPeer.prototype._hasLatestOffer = function () {
+  var latestSessionId = this._remoteOffer.sdp.match(sessionIdRegex)[1]
+  var currentSessionId = this.connection.remoteDescription.sdp.match(sessionIdRegex)[1]
+  if (latestSessionId === currentSessionId) {
+    return true
   }
 
-  debug(this.id, 'onCreateOffer', offer)
+  debug(this.id, 'found later offer', this._remoteOffer)
 
-  this.connection.setLocalDescription(
-    offer,
-    this._trickle ? this._sendOffer : noop,
-    this._onError
-  )
-}
-
-SimplerPeer.prototype._sendOffer = function () {
-  if (this._didSendOffer) {
-    return
-  } else {
-    this._didSendOffer = true
-  }
-
-  var signal = this.connection.localDescription
-
-  debug(this.id, 'sendOffer', signal)
-
-  this.emit('signal', signal)
-}
-
-SimplerPeer.prototype._onCreateAnswer = function (answer) {
-  if (this.closed) {
-    return
-  }
-
-  debug(this.id, 'onCreateAnswer', answer)
-
-  this.connection.setLocalDescription(
-    answer,
-    this._trickle ? this._sendAnswer : noop,
-    this._onError
-  )
-}
-
-SimplerPeer.prototype._sendAnswer = function () {
-  if (this._didSendAnswer) {
-    return
-  } else {
-    this._didSendAnswer = true
-  }
-
-  var signal = this.connection.localDescription
-
-  debug(this.id, 'sendAnswer', signal)
-
-  this.emit('signal', signal)
+  var offer = this._remoteOffer
+  delete this._remoteOffer
+  this._processRemoteOffer(offer)
 }
 
 SimplerPeer.prototype._onSetRemoteDescription = function () {
-  if (this.closed) {
-    return
-  }
+  if (this.closed || !this._hasLatestOffer()) return
 
   debug(this.id, 'onSetRemoteDescription')
 
-  if (this.connection.remoteDescription.type === 'offer') {
-    this.connection.createAnswer(
-      this._onCreateAnswer,
+  this.connection.createAnswer(
+    this._onCreateAnswer,
+    this._onError
+  )
+}
+
+SimplerPeer.prototype._onCreateAnswer = function (answer) {
+  if (this.closed || !this._hasLatestOffer()) return
+  delete this._remoteOffer
+
+  debug(this.id, 'onCreateAnswer', answer)
+
+  if (this.connected) {
+    this._channel.send(
+      JSON.stringify(answer)
+    )
+  } else if (this._trickle) {
+    this.emit('signal', answer)
+  }
+
+  this.connection.setLocalDescription(
+    answer,
+    noop,
+    this._onError
+  )
+}
+
+SimplerPeer.prototype._onSetLocalDescription = function () {
+  if (this.closed) return
+
+  debug(this.id, 'onSetLocalDescription')
+
+  if (this._remoteAnswer) {
+    var answer = this._remoteAnswer
+    delete this._remoteAnswer
+    this.connection.setRemoteDescription(
+      answer,
+      noop,
       this._onError
     )
-  }
-}
-
-SimplerPeer.prototype._onaddStream = function (evt) {
-  if (this.closed) {
-    return
-  }
-
-  debug(this.id, 'onaddStream', evt.stream)
-
-  this.emit('stream', evt.stream)
-}
-
-SimplerPeer.prototype._onDataChannel = function (evt) {
-  if (this.closed) {
-    return
-  }
-
-  var channel = new DataChannel(evt.channel)
-
-  if (channel.label === 'internal' && !this._channel) {
-    this._channel = channel
-    this._channel.once('open', this._onChannelOpen)
-
-    debug(this.id, 'onDataChannel (internal)', channel)
-  } else {
-    debug(this.id, 'onDataChannel', channel)
-    this.emit('datachannel', channel)
+  } else if (this._trickle) {
+    this.emit('signal', this.connection.localDescription)
   }
 }
 
 SimplerPeer.prototype._onIceCandidate = function (evt) {
-  if (this.closed) {
-    return
-  }
+  if (this.closed) return
 
   debug(this.id, 'onIceCandidate', evt)
 
@@ -246,59 +281,78 @@ SimplerPeer.prototype._onIceCandidate = function (evt) {
 }
 
 SimplerPeer.prototype._onIceConnectionStateChange = function (evt) {
-  if (this.closed) {
-    return
-  }
+  if (this.closed) return
 
-  debug(this.id, 'statechange', this.state)
+  var state = this.connection.iceConnectionState
 
-  this.emit('statechange', this.state)
+  debug(this.id, 'statechange', state)
 
-  if (this.state === 'connected' ||
-      this.state === 'completed') {
+  this.emit('statechange', state)
+
+  if (state === 'completed' || state === 'connected') {
     this._onIceComplete()
-    this._maybeConnect()
-  } else if (this.state === 'disconnected' ||
-             this.state === 'failed' ||
-             this.state === 'closed') {
+  } else if (state === 'failed' || state === 'closed') {
     this.close()
   }
 }
 
 SimplerPeer.prototype._onIceComplete = function () {
   this.connection.onicecandidate = null
+  this._onIceComplete = noop
 
   debug(this.id, 'onIceComplete')
 
-  if (this._initiator) {
-    this._sendOffer()
+  if (!this._trickle) {
+    this.emit('signal', this.connection.localDescription)
+  }
+}
+
+SimplerPeer.prototype._onDataChannel = function (evt) {
+  if (this.closed) return
+
+  var channel = new DataChannel(evt.channel)
+  if (channel.label === 'internal' && !this._channel) {
+    debug(this.id, 'onDataChannel (internal)', channel)
+
+    this._channel = channel
+    this._channel.on('open', this._onChannelOpen)
   } else {
-    this._sendAnswer()
+    debug(this.id, 'onDataChannel', channel)
+
+    this.emit('datachannel', channel)
   }
 }
 
 SimplerPeer.prototype._onChannelOpen = function () {
-  if (this.closed) {
-    return
-  }
+  if (this.closed) return
 
-  debug(this.id, 'onChannelOpen')
+  debug(this.id, 'connect')
 
   this._channel.on('close', this.close.bind(this))
-  this._maybeConnect()
+  this._channel.on('message', this._onChannelMessage)
+  this.connected = true
+  this.emit('connect')
 }
 
-SimplerPeer.prototype._maybeConnect = function () {
-  if (this._channel && this._channel.readyState === 'open') {
-    this._maybeConnect = noop
+SimplerPeer.prototype._onChannelMessage = function (evt) {
+  if (this.closed) return
 
-    debug(this.id, 'connect')
+  debug(this.id, 'onChannelMessage', evt)
 
-    this.emit('connect')
-  }
+  this.signal(evt.data)
+}
+
+SimplerPeer.prototype._onaddStream = function (evt) {
+  if (this.closed) return
+
+  debug(this.id, 'onaddStream', evt.stream)
+
+  this.emit('stream', evt.stream)
 }
 
 SimplerPeer.prototype._onError = function (err) {
+  debug(this.id, 'error', err)
+
   this.emit('error', err)
 }
 
