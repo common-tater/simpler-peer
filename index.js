@@ -29,7 +29,6 @@ function SimplerPeer (opts) {
   EventEmitter.call(this)
 
   this._initiator = opts.initiator
-  this._defaultChannelConfig = opts.channelConfig
   this._trickle = opts.trickle !== undefined ? opts.trickle : true
 
   this._onSetRemoteDescription = this._onSetRemoteDescription.bind(this)
@@ -37,7 +36,7 @@ function SimplerPeer (opts) {
   this._onCreateAnswer = this._onCreateAnswer.bind(this)
   this._sendOffer = this._sendOffer.bind(this)
   this._sendAnswer = this._sendAnswer.bind(this)
-  this._onDefaultChannelOpen = this._onDefaultChannelOpen.bind(this)
+  this._onChannelOpen = this._onChannelOpen.bind(this)
   this._onError = this._onError.bind(this)
 
   this.id = opts.id || (Math.random() + '').slice(2)
@@ -52,8 +51,8 @@ function SimplerPeer (opts) {
   }
 
   if (this._initiator) {
-    this.defaultChannel = this.createDataChannel('default')
-    this.defaultChannel.once('open', this._onDefaultChannelOpen)
+    this._channel = this.createDataChannel('internal')
+    this._channel.once('open', this._onChannelOpen)
     this.connection.createOffer(
       this._onCreateOffer,
       this._onError
@@ -70,7 +69,7 @@ Object.defineProperty(SimplerPeer.prototype, 'state', {
 SimplerPeer.prototype.createDataChannel = function (label, opts) {
   debug(this.id, 'createDataChannel', label)
 
-  return new DataChannel(this.connection.createDataChannel(label, opts || this._defaultChannelConfig))
+  return new DataChannel(this.connection.createDataChannel(label, opts))
 }
 
 SimplerPeer.prototype.signal = function (signal) {
@@ -104,7 +103,7 @@ SimplerPeer.prototype.close = function () {
   debug(this.id, 'close')
 
   try {
-    this.defaultChannel.close()
+    this._channel.close()
   } catch (err) {}
 
   try {
@@ -214,14 +213,15 @@ SimplerPeer.prototype._onDataChannel = function (evt) {
 
   var channel = new DataChannel(evt.channel)
 
-  if (channel.label === 'default' && !this.defaultChannel) {
-    this.defaultChannel = channel
-    this.defaultChannel.once('open', this._onDefaultChannelOpen)
+  if (channel.label === 'internal' && !this._channel) {
+    this._channel = channel
+    this._channel.once('open', this._onChannelOpen)
+
+    debug(this.id, 'onDataChannel (internal)', channel)
+  } else {
+    debug(this.id, 'onDataChannel', channel)
+    this.emit('datachannel', channel)
   }
-
-  debug(this.id, 'onDataChannel', channel)
-
-  this.emit('datachannel', channel)
 }
 
 SimplerPeer.prototype._onIceCandidate = function (evt) {
@@ -277,19 +277,19 @@ SimplerPeer.prototype._onIceComplete = function () {
   }
 }
 
-SimplerPeer.prototype._onDefaultChannelOpen = function () {
+SimplerPeer.prototype._onChannelOpen = function () {
   if (this.closed) {
     return
   }
 
-  debug(this.id, 'onDefaultChannelOpen')
+  debug(this.id, 'onChannelOpen')
 
-  this.defaultChannel.on('close', this.close.bind(this))
+  this._channel.on('close', this.close.bind(this))
   this._maybeConnect()
 }
 
 SimplerPeer.prototype._maybeConnect = function () {
-  if (this.defaultChannel && this.defaultChannel.readyState === 'open') {
+  if (this._channel && this._channel.readyState === 'open') {
     this._maybeConnect = noop
 
     debug(this.id, 'connect')
