@@ -122,8 +122,8 @@ tape('close without trickle', function (t) {
 tape('renegotiation triggered by addStream', function (t) {
   t.plan(4)
 
-  p1 = new SimplerPeer({ id: 'p1', initiator: true })
-  p2 = new SimplerPeer({ id: 'p2' })
+  p1 = new SimplerPeer({ initiator: true })
+  p2 = new SimplerPeer()
 
   p1.on('signal', function (signal) {
     p2.signal(signal)
