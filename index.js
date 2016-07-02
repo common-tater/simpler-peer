@@ -4,7 +4,7 @@ var webrtc = require('get-browser-rtc')()
 var inherits = require('inherits')
 var EventEmitter = require('events').EventEmitter
 var DataChannel = require('./data-channel')
-var sessionVersionRegex = /\no=- [^ ]* ([^ ]*)/
+var sessionVersionRegex = /\no=[^ ]* [^ ]* ([^ ]*)/
 
 inherits(SimplerPeer, EventEmitter)
 
