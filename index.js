@@ -71,8 +71,8 @@ SimplerPeer.prototype.signal = function (signal) {
 
   if (signal.sdp) {
     this._processRemoteSessionDescription(signal)
-  } else if (signal.candidate) {
-    this._processRemoteIceCandidate(signal.candidate)
+  } else {
+    this._processRemoteIceCandidate(signal)
   }
 }
 
@@ -276,7 +276,7 @@ SimplerPeer.prototype._onIceCandidate = function (evt) {
 
   if (this.trickle) {
     if (evt.candidate) {
-      this.emit('signal', evt)
+      this.emit('signal', evt.candidate)
     }
   } else {
     clearTimeout(this._iceGatheringTimeout)
