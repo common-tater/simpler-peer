@@ -29,8 +29,6 @@ function SimplerPeer (opts) {
 
   EventEmitter.call(this)
 
-  this._trickle = opts.trickle !== undefined ? opts.trickle : true
-
   this._onSetRemoteDescription = this._onSetRemoteDescription.bind(this)
   this._onSetLocalDescription = this._onSetLocalDescription.bind(this)
   this._onCreateOffer = this._onCreateOffer.bind(this)
@@ -40,6 +38,7 @@ function SimplerPeer (opts) {
   this._onError = this._onError.bind(this)
 
   this.id = opts.id || (Math.random() + '').slice(2)
+  this.trickle = opts.trickle !== undefined ? opts.trickle : true
   this.connection = new webrtc.RTCPeerConnection(opts.config)
   this.connection.ondatachannel = this._onDataChannel.bind(this)
   this.connection.onicecandidate = this._onIceCandidate.bind(this)
@@ -241,7 +240,7 @@ SimplerPeer.prototype._onCreateAnswer = function (answer) {
     this._channel.send(
       JSON.stringify(answer)
     )
-  } else if (this._trickle) {
+  } else if (this.trickle) {
     this.emit('signal', answer)
   }
 
@@ -265,7 +264,7 @@ SimplerPeer.prototype._onSetLocalDescription = function () {
       noop,
       this._onError
     )
-  } else if (this._trickle) {
+  } else if (this.trickle) {
     this.emit('signal', this.connection.localDescription)
   }
 }
@@ -275,7 +274,7 @@ SimplerPeer.prototype._onIceCandidate = function (evt) {
 
   debug(this.id, 'onIceCandidate', evt)
 
-  if (this._trickle) {
+  if (this.trickle) {
     if (evt.candidate) {
       this.emit('signal', evt)
     }
@@ -311,7 +310,7 @@ SimplerPeer.prototype._onIceComplete = function () {
 
   debug(this.id, 'onIceComplete')
 
-  if (!this._trickle) {
+  if (!this.trickle) {
     this.emit('signal', this.connection.localDescription)
   }
 }
