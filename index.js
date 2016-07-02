@@ -29,7 +29,6 @@ function SimplerPeer (opts) {
 
   EventEmitter.call(this)
 
-  this._initiator = opts.initiator
   this._trickle = opts.trickle !== undefined ? opts.trickle : true
 
   this._onSetRemoteDescription = this._onSetRemoteDescription.bind(this)
@@ -48,14 +47,18 @@ function SimplerPeer (opts) {
   this.connection.onaddstream = this._onaddStream.bind(this)
   this.connection.onnegotiationneeded = this._onNegotiationNeeded.bind(this)
 
-  if (opts.stream) {
-    this.connection.addStream(opts.stream)
+  if (opts.initiator) {
+    this.connect()
+  }
+}
+
+SimplerPeer.prototype.connect = function (signal) {
+  if (this._channel) {
+    throw new Error('connection already initialized')
   }
 
-  if (this._initiator) {
-    this._channel = this.createDataChannel('internal')
-    this._channel.once('open', this._onChannelOpen)
-  }
+  this._channel = this.createDataChannel('internal')
+  this._channel.once('open', this._onChannelOpen)
 }
 
 SimplerPeer.prototype.signal = function (signal) {
