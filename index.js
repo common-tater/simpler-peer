@@ -60,7 +60,8 @@ function SimplerPeer (opts) {
 
 SimplerPeer.prototype.connect = function (signal) {
   if (this._channel) {
-    throw new Error('connection already initialized')
+    this._onError(new Error('connection already initialized'))
+    return
   }
 
   this._channel = this.createDataChannel('internal')
@@ -70,6 +71,7 @@ SimplerPeer.prototype.connect = function (signal) {
 SimplerPeer.prototype.signal = function (signal) {
   if (this.closed) {
     this._onError(new Error('cannot signal after connection has closed'))
+    return
   }
 
   if (typeof signal === 'string') {
