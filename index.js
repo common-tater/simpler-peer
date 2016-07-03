@@ -262,7 +262,7 @@ SimplerPeer.prototype._onSetLocalAnswer = function () {
       if (track.readyState !== undefined) return
       if (!this.remoteTrackIds[track.id]) {
         track.onended && track.onended()
-        track.dispatchEvent(new Event('ended'))
+        track.dispatchEvent(new window.Event('ended'))
       }
     })
     if (!this.remoteStreamIds[id]) {
@@ -424,7 +424,7 @@ SimplerPeer.prototype._onTrack = function (evt) {
   } else {
     evt = {
       track: evt.stream.getTracks()[0],
-      streams: [ evt.stream ],
+      streams: [ evt.stream ]
     }
   }
 

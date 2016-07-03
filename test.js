@@ -1,7 +1,7 @@
 var SimplerPeer = require('./')
 var tape = require('tape')
 
-var ctx = new AudioContext()
+var ctx = new window.AudioContext()
 var p1 = null
 var p2 = null
 
@@ -146,7 +146,7 @@ tape('handle session renegotiation when addTrack is called', function (t) {
     })
 
     var stream = ctx.createMediaStreamDestination().stream
-    var sender = p1.addTrack(stream.getTracks()[0], stream)
+    p1.addTrack(stream.getTracks()[0], stream)
   }
 
   function onaddTrack () {
@@ -236,8 +236,8 @@ tape('handle session renegotiation when offers are received by both sides simult
 
     var stream1 = ctx.createMediaStreamDestination().stream
     var stream2 = ctx.createMediaStreamDestination().stream
-    var sender1 = p1.addTrack(stream1.getTracks()[0], stream1)
-    var sender2 = p2.addTrack(stream2.getTracks()[0], stream2)
+    p1.addTrack(stream1.getTracks()[0], stream1)
+    p2.addTrack(stream2.getTracks()[0], stream2)
   }
 
   var o = 2
@@ -288,7 +288,7 @@ tape('handle session renegotiation when offers are received by both sides simult
 
     // actually add a stream from p2
     var stream = ctx.createMediaStreamDestination().stream
-    var sender = p2.addTrack(stream.getTracks()[0], stream)
+    p2.addTrack(stream.getTracks()[0], stream)
   }
 
   function onaddTrack () {
