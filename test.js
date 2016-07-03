@@ -1,6 +1,7 @@
 var SimplerPeer = require('./')
 var tape = require('tape')
 
+var ctx = new AudioContext()
 var p1 = null
 var p2 = null
 
@@ -113,8 +114,8 @@ tape('connect with trickle ice disabled', function (t) {
   }
 })
 
-tape('automatically handle session renegotiation when addStream is called', function (t) {
-  t.plan(3)
+tape('handle session renegotiation when addTrack is called', function (t) {
+  t.plan(1)
 
   p1 = new SimplerPeer({ initiator: true })
   p2 = new SimplerPeer()
@@ -128,12 +129,10 @@ tape('automatically handle session renegotiation when addStream is called', func
   })
 
   p1.on('connect', function () {
-    t.pass('p1 connected')
     onconnect()
   })
 
   p2.on('connect', function () {
-    t.pass('p2 connected')
     onconnect()
   })
 
@@ -141,24 +140,23 @@ tape('automatically handle session renegotiation when addStream is called', func
   function onconnect () {
     if (--n !== 0) return
 
-    p2.on('stream', function (remoteStream) {
-      t.ok(remoteStream)
-      onaddStream()
+    p2.on('track', function (evt) {
+      t.ok(evt.track)
+      onaddTrack()
     })
 
-    var ctx = new AudioContext()
     var stream = ctx.createMediaStreamDestination().stream
-    p1.addStream(stream)
+    var sender = p1.addTrack(stream.getTracks()[0], stream)
   }
 
-  function onaddStream () {
+  function onaddTrack () {
     p1.close()
     p2.close()
   }
 })
 
-tape('automatically handle session renegotiation when removeStream is called', function (t) {
-  t.plan(4)
+tape('handle session renegotiation when removeTrack is called', function (t) {
+  t.plan(2)
 
   p1 = new SimplerPeer({ initiator: true })
   p2 = new SimplerPeer()
@@ -172,12 +170,10 @@ tape('automatically handle session renegotiation when removeStream is called', f
   })
 
   p1.on('connect', function () {
-    t.pass('p1 connected')
     onconnect()
   })
 
   p2.on('connect', function () {
-    t.pass('p2 connected')
     onconnect()
   })
 
@@ -185,26 +181,25 @@ tape('automatically handle session renegotiation when removeStream is called', f
   function onconnect () {
     if (--n !== 0) return
 
-    p2.on('stream', function (remoteStream) {
-      t.ok(remoteStream)
-      remoteStream.onended = onstreamEnded
-      p1.removeStream(stream)
+    p2.on('track', function (evt) {
+      t.ok(evt.track)
+      evt.track.onended = ontrackEnded
+      p1.removeTrack(sender)
     })
 
-    var ctx = new AudioContext()
     var stream = ctx.createMediaStreamDestination().stream
-    p1.addStream(stream)
+    var sender = p1.addTrack(stream.getTracks()[0], stream)
   }
 
-  function onstreamEnded () {
+  function ontrackEnded () {
     t.pass()
     p1.close()
     p2.close()
   }
 })
 
-tape('automatically handle session renegotiation when addStream is called by both sides simultaneously', function (t) {
-  t.plan(4)
+tape('handle session renegotiation when offers are received by both sides simultaneously', function (t) {
+  t.plan(2)
 
   p1 = new SimplerPeer({ initiator: true })
   p2 = new SimplerPeer()
@@ -218,12 +213,10 @@ tape('automatically handle session renegotiation when addStream is called by bot
   })
 
   p1.on('connect', function () {
-    t.pass('p1 connected')
     onconnect()
   })
 
   p2.on('connect', function () {
-    t.pass('p2 connected')
     onconnect()
   })
 
@@ -231,33 +224,32 @@ tape('automatically handle session renegotiation when addStream is called by bot
   function onconnect () {
     if (--n !== 0) return
 
-    p1.on('stream', function (remoteStream) {
-      t.ok(remoteStream)
-      onaddStream()
+    p1.on('track', function (evt) {
+      t.ok(evt.track)
+      onaddTrack()
     })
 
-    p2.on('stream', function (remoteStream) {
-      t.ok(remoteStream)
-      onaddStream()
+    p2.on('track', function (evt) {
+      t.ok(evt.track)
+      onaddTrack()
     })
 
-    var ctx = new AudioContext()
     var stream1 = ctx.createMediaStreamDestination().stream
-    p1.addStream(stream1)
     var stream2 = ctx.createMediaStreamDestination().stream
-    p2.addStream(stream2)
+    var sender1 = p1.addTrack(stream1.getTracks()[0], stream1)
+    var sender2 = p2.addTrack(stream2.getTracks()[0], stream2)
   }
 
   var o = 2
-  function onaddStream () {
+  function onaddTrack () {
     if (--o !== 0) return
     p1.close()
     p2.close()
   }
 })
 
-tape('only uses the latest of multiple offers during automatic session renegotiation', function (t) {
-  t.plan(3)
+tape('handle session renegotiation when offers are received by both sides simultaneously but the winning offer carries fewer than the required number of m-lines', function (t) {
+  t.plan(2)
 
   p1 = new SimplerPeer({ initiator: true })
   p2 = new SimplerPeer()
@@ -271,12 +263,10 @@ tape('only uses the latest of multiple offers during automatic session renegotia
   })
 
   p1.on('connect', function () {
-    t.pass('p1 connected')
     onconnect()
   })
 
   p2.on('connect', function () {
-    t.pass('p2 connected')
     onconnect()
   })
 
@@ -284,27 +274,25 @@ tape('only uses the latest of multiple offers during automatic session renegotia
   function onconnect () {
     if (--n !== 0) return
 
-    p1.on('stream', function (remoteStream) {
-      t.ok(remoteStream)
-      onaddStream()
+    p1.on('track', function (evt) {
+      t.ok(evt.track)
+      onaddTrack()
     })
 
-    p2.on('stream', function (remoteStream) {
-      t.fail()
-    })
+    // force p1's offer to always win
+    p1._compareOffers = function (a, b) { return true }
+    p2._compareOffers = function (a, b) { return false }
 
-    var ctx = new AudioContext()
-    var stream1 = ctx.createMediaStreamDestination().stream
-    p1.addStream(stream1)
-    var stream2 = ctx.createMediaStreamDestination().stream
-    p2.addStream(stream2)
+    // manually force p1 to renegotiate
+    p1._onNegotiationNeeded()
 
-    // this will cause p2 to get multiple offers
-    // before setting localDescription
-    p1.removeStream(stream1)
+    // actually add a stream from p2
+    var stream = ctx.createMediaStreamDestination().stream
+    var sender = p2.addTrack(stream.getTracks()[0], stream)
   }
 
-  function onaddStream () {
+  function onaddTrack () {
+    t.pass()
     p1.close()
     p2.close()
   }
