@@ -17,6 +17,29 @@ function SimplerPeer (opts) {
     throw new Error('your browser does not support WebRTC')
   }
 
+  EventEmitter.call(this)
+
+  ;[
+    '_onSetRemoteDescription',
+    '_onSetLocalDescription',
+    '_onSetRemoteAnswer',
+    '_onSetLocalAnswer',
+    '_onCreateOffer',
+    '_onCreateAnswer',
+    '_onChannelOpen',
+    '_onChannelMessage',
+    '_onIceComplete',
+    '_onDataChannel',
+    '_onIceCandidate',
+    '_onIceConnectionStateChange',
+    '_onNegotiationNeeded',
+    '_onTrack',
+    '_onError',
+    'close',
+  ].forEach(method => {
+    this[method] = this[method].bind(this)
+  })
+
   opts = opts || {}
   opts.config = opts.config || {
     iceServers: [
@@ -27,31 +50,17 @@ function SimplerPeer (opts) {
     ]
   }
 
-  EventEmitter.call(this)
-
-  this._onSetRemoteDescription = this._onSetRemoteDescription.bind(this)
-  this._onSetLocalDescription = this._onSetLocalDescription.bind(this)
-  this._onSetRemoteAnswer = this._onSetRemoteAnswer.bind(this)
-  this._onSetLocalAnswer = this._onSetLocalAnswer.bind(this)
-  this._onCreateOffer = this._onCreateOffer.bind(this)
-  this._onCreateAnswer = this._onCreateAnswer.bind(this)
-  this._onChannelOpen = this._onChannelOpen.bind(this)
-  this._onChannelMessage = this._onChannelMessage.bind(this)
-  this._onIceComplete = this._onIceComplete.bind(this)
-  this._onError = this._onError.bind(this)
-  this.close = this.close.bind(this)
-
   this.id = opts.id || (Math.random() + '').slice(2)
   this.trickle = opts.trickle !== undefined ? opts.trickle : true
   this.remoteStreams = {}
   this.remoteStreamIds = {}
   this.remoteTrackIds = {}
   this.connection = new webrtc.RTCPeerConnection(opts.config)
-  this.connection.ondatachannel = this._onDataChannel.bind(this)
-  this.connection.onicecandidate = this._onIceCandidate.bind(this)
-  this.connection.oniceconnectionstatechange = this._onIceConnectionStateChange.bind(this)
-  this.connection.onnegotiationneeded = this._onNegotiationNeeded.bind(this)
-  this.connection[this.connection.addTrack ? 'ontrack' : 'onaddstream'] = this._onTrack.bind(this)
+  this.connection.ondatachannel = this._onDataChannel
+  this.connection.onicecandidate = this._onIceCandidate
+  this.connection.oniceconnectionstatechange = this._onIceConnectionStateChange
+  this.connection.onnegotiationneeded = this._onNegotiationNeeded
+  this.connection[this.connection.addTrack ? 'ontrack' : 'onaddstream'] = this._onTrack
 
   if (opts.initiator) {
     this.connect()
