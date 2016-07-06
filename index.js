@@ -2,9 +2,8 @@ module.exports = SimplerPeer
 
 var webrtc = require('get-browser-rtc')()
 var inherits = require('inherits')
-var EventEmitter = require('events').EventEmitter
+var EventEmitter = require('events')
 var DataChannel = require('./data-channel')
-var sessionRegex = /\no=[^ ]* ([^ ]*) ([^ ]*)/
 
 inherits(SimplerPeer, EventEmitter)
 
@@ -19,29 +18,7 @@ function SimplerPeer (opts) {
 
   EventEmitter.call(this)
 
-  ;[
-    '_onSetRemoteDescription',
-    '_onSetLocalDescription',
-    '_onSetRemoteAnswer',
-    '_onSetLocalAnswer',
-    '_onCreateOffer',
-    '_onCreateAnswer',
-    '_onChannelOpen',
-    '_onChannelMessage',
-    '_onIceComplete',
-    '_onDataChannel',
-    '_onIceCandidate',
-    '_onIceConnectionStateChange',
-    '_onNegotiationNeeded',
-    '_onTrack',
-    '_onError',
-    'close',
-  ].forEach(method => {
-    this[method] = this[method].bind(this)
-  })
-
-  opts = opts || {}
-  opts.config = opts.config || {
+  this._opts = {
     iceServers: [
       {
         url: 'stun:23.21.150.121',
@@ -49,405 +26,507 @@ function SimplerPeer (opts) {
       }
     ]
   }
+  for (var key in opts) {
+    this._opts[key] = opts[key]
+  }
 
-  this.id = opts.id || (Math.random() + '').slice(2)
-  this.trickle = opts.trickle !== undefined ? opts.trickle : true
-  this.remoteStreams = {}
-  this.remoteStreamIds = {}
-  this.remoteTrackIds = {}
-  this.connection = new webrtc.RTCPeerConnection(opts.config)
-  this.connection.ondatachannel = this._onDataChannel
-  this.connection.onicecandidate = this._onIceCandidate
-  this.connection.oniceconnectionstatechange = this._onIceConnectionStateChange
-  this.connection.onnegotiationneeded = this._onNegotiationNeeded
-  this.connection[this.connection.addTrack ? 'ontrack' : 'onaddstream'] = this._onTrack
+  var self = this
+  ;[
+    '_onnegotiationneeded',
+    '_onicecandidate',
+    '_oniceconnectionstatechange',
+    '_ondatachannel',
+    '_onchannelopen',
+    '_onchannelclose',
+    '_onchannelmessage',
+    '_ontrack'
+  ].forEach(function (method) {
+    self[method] = self[method].bind(self)
+  })
 
-  if (opts.initiator) {
-    this.connect()
+  this.id = this._opts.id || (Math.random() + '').slice(2)
+  this._localTracksPendingAdd = {}
+  this._localTracksPendingRemove = {}
+  this._localTracks = {}
+  this._localChannels = {}
+  this._remoteStreams = {}
+  this._remoteStreamIds = {}
+  this._remoteTrackIds = {}
+}
+
+// public API
+
+SimplerPeer.prototype.connect = function (remoteId) {
+  this._destroyConnection()
+  this._createConnection()
+  var connection = this.connection
+  if (this.id === remoteId) {
+    this.emit('error', new Error('cannot connect peers with the same id'))
+    return
+  }
+  if (this.id > remoteId) {
+    this.initiator = true
+    this._channel = this._setupChannel(
+      connection.createDataChannel('internal')
+    )
+    var self = this
+    connection.createOffer(function (offer) {
+      if (connection !== self.connection) return
+      connection.setLocalDescription(offer, function () {
+        if (connection !== self.connection) return
+        self._localOffer = offer
+        self.emit('signal', offer)
+      }, function (err) {
+        if (connection !== self.connection) return
+        self._destroyConnection()
+        self.emit('error', err)
+      })
+    }, function (err) {
+      if (connection !== self.connection) return
+      self._destroyConnection()
+      self.emit('error', err)
+    })
+  } else {
+    this.initiator = false
   }
 }
 
-SimplerPeer.prototype.connect = function (signal) {
-  if (this._channel) {
-    this._onError(new Error('connection already initialized'))
-    return
-  }
-
-  this._channel = this.createDataChannel('internal')
-  this._channel.once('open', this._onChannelOpen)
+SimplerPeer.prototype.disconnect = function () {
+  this._destroyConnection()
 }
 
 SimplerPeer.prototype.signal = function (signal) {
-  if (this.closed) {
-    this._onError(new Error('cannot signal after connection has closed'))
-    return
-  }
-
-  if (typeof signal === 'string') {
-    signal = JSON.parse(signal)
-  }
-
   if (signal.sdp) {
-    this._processRemoteSessionDescription(signal)
+    if (signal.type === 'offer') {
+      this._receiveOffer(signal)
+    } else {
+      this._receiveAnswer(signal)
+    }
   } else {
-    this._processRemoteIceCandidate(signal)
+    this._receiveIceCandidate(signal)
   }
 }
 
 SimplerPeer.prototype.createDataChannel = function (label, opts) {
-  debug(this.id, 'createDataChannel', label)
-
+  if (!this.connection) return
+  // TODO mirror track api?
   return new DataChannel(this.connection.createDataChannel(label, opts))
 }
 
-SimplerPeer.prototype.addTrack = function (track, firstStream) {
-  debug(this.id, 'addTrack', track)
-
-  this.negotiationNeeded = true
-  if (this.connection.addTrack) {
-    return this.connection.addTrack.apply(
-      this.connection,
-      arguments
-    )
+SimplerPeer.prototype.addTrack = function (track, stream) {
+  if (stream) {
+    track._stream = stream
   } else {
-    this.connection.addStream(firstStream)
-    return firstStream
+    stream = track._stream
   }
-}
-
-SimplerPeer.prototype.removeTrack = function (sender) {
-  debug(this.id, 'removeTrack', sender)
-
-  this.negotiationNeeded = true
-  if (this.connection.removeTrack) {
-    this.connection.removeTrack(sender)
-  } else {
-    this.connection.removeStream(sender)
+  if (this._localTracks[track.id] ||
+      this._localTracksPendingAdd[track.id]) {
+    throw new TypeError('track already added')
   }
-}
-
-SimplerPeer.prototype.close = function () {
-  if (this.closed) return
-  this.closed = true
-  this.connected = false
-
-  debug(this.id, 'close')
-
-  try {
-    this._channel.close()
-  } catch (err) {}
-
-  try {
-    this.connection.close()
-  } catch (err) {}
-
-  this.emit('close')
-}
-
-// private API below
-
-SimplerPeer.prototype._onNegotiationNeeded = function (evt) {
-  if (this.closed) return
-
-  debug(this.id, 'onNegotiationNeeded', !!evt, !!this._localOffer, !!this._remoteOffer)
-
-  this.emit('negotiationneeded')
-
-  if (this._localOffer || this._remoteOffer) {
-    if (this._localOffer && this._localOffer.sdp) {
-      this.negotiationNeeded = true
-    }
+  if (!this.connected || this._negotiating) {
+    this._localTracksPendingAdd[track.id] = track
     return
   } else {
-    delete this.negotiationNeeded
+    delete this._localTracksPendingAdd[track.id]
+    this._localTracks[track.id] = track
   }
-
-  this._localOffer = {}
-  this.connection.createOffer(
-    this._onCreateOffer,
-    this._onError
-  )
-}
-
-SimplerPeer.prototype._onCreateOffer = function (offer) {
-  debug(this.id, 'onCreateOffer', offer)
-
-  this._localOffer = offer
-
-  if (this.connected) {
-    this._channel.send(
-      JSON.stringify(offer)
+  if (this.connection.addTrack) {
+    track._sender = this.connection.addTrack(
+      track,
+      stream
     )
   } else {
-    this.connection.setLocalDescription(
-      offer,
-      this._onSetLocalDescription,
-      this._onError
-    )
+    this.connection.addStream(stream)
   }
 }
 
-SimplerPeer.prototype._processRemoteSessionDescription = function (signal) {
-  // workaround for FF not triggering track.onended
-  this.remoteStreamIds = {}
-  this.remoteTrackIds = {}
-  signal.sdp.split('msid:').slice(1).forEach(line => {
-    var parts = line.split(' ')
-    this.remoteStreamIds[parts[0]] = true
-    this.remoteTrackIds[parts[1]] = true
-  })
-
-  if (signal.type === 'offer') {
-    this._processRemoteOffer(signal)
-  } else if (signal.type === 'answer') {
-    this._processRemoteAnswer(signal)
+SimplerPeer.prototype.removeTrack = function (track) {
+  if (this._localTracksPendingAdd[track.id]) {
+    delete this._localTracksPendingAdd[track.id]
+    return
+  }
+  if (!this._localTracks[track.id]) {
+    throw new TypeError('unrecognized track')
+  }
+  if (!this.connected || this._negotiating) {
+    this._localTracksPendingRemove[track.id] = track
+    return
+  } else {
+    delete this._localTracksPendingRemove[track.id]
+    delete this._localTracks[track.id]
+  }
+  if (this.connection.removeTrack) {
+    this.connection.removeTrack(track._sender)
+  } else {
+    this.connection.removeStream(track._stream)
   }
 }
 
-SimplerPeer.prototype._processRemoteOffer = function (offer) {
-  if (this._localOffer && !this._remoteAnswer) {
-    if (this.connection.signalingState === 'have-local-offer') {
-      this._onError(new Error('sdp rollback not yet supported'))
-      this.close()
-      return
-    }
-    var didChooseLocalOffer = this._compareOffers(this._localOffer, offer)
-    delete this._localOffer
-    if (didChooseLocalOffer) {
-      return
-    } else {
-      this.negotiationNeeded = true
-    }
-  }
+// private API
 
-  debug(this.id, 'got offer', offer)
-
-  this._remoteOffer = offer
-  this.connection.setRemoteDescription(
-    new webrtc.RTCSessionDescription(offer),
-    this._onSetRemoteDescription,
-    this._onError
-  )
+SimplerPeer.prototype._createConnection = function () {
+  if (this.connection) return
+  this.connection = new webrtc.RTCPeerConnection(this._opts)
+  this.connection.onicecandidate = this._onicecandidate
+  this.connection.oniceconnectionstatechange = this._oniceconnectionstatechange
+  this.connection.ondatachannel = this._ondatachannel
+  this.connection.onnegotiationneeded = this._onnegotiationneeded
+  this.connection[this.connection.addTrack ? 'ontrack' : 'onaddstream'] = this._ontrack
 }
 
-SimplerPeer.prototype._compareOffers = function (a, b) {
-  return a.sdp.match(sessionRegex)[1] > b.sdp.match(sessionRegex)[1]
-}
-
-SimplerPeer.prototype._onSetRemoteDescription = function () {
-  debug(this.id, 'onSetRemoteDescription')
-
-  this.connection.createAnswer(
-    this._onCreateAnswer,
-    this._onError
-  )
-}
-
-SimplerPeer.prototype._onCreateAnswer = function (answer) {
-  debug(this.id, 'onCreateAnswer', answer)
-
+SimplerPeer.prototype._destroyConnection = function () {
+  if (!this.connection) return
+  var connected = this.connected
+  var connection = this.connection
+  var channel = this._channel
+  connection.onnegotiationneeded = null
+  connection.oniceconnectionstatechange = null
+  connection.onicecandidate = null
+  connection.ondatachannel = null
+  connection[connection.addTrack ? 'ontrack' : 'onaddstream'] = null
+  delete this.initiator
+  delete this.connection
+  delete this.connected
+  delete this._channel
+  delete this._localOffer
   delete this._remoteOffer
-
-  if (this.connected) {
-    this._channel.send(
-      JSON.stringify(answer)
-    )
-  } else if (this.trickle) {
-    this.emit('signal', answer)
+  delete this._remoteAnswer
+  delete this._icecomplete
+  delete this._negotiationNeeded
+  delete this._negotiating
+  for (var id in this._localTracks) {
+    this._localTracksPendingAdd[id] = this._localTracks[id]
   }
-
-  this.connection.setLocalDescription(
-    answer,
-    this._onSetLocalAnswer,
-    this._onError
-  )
+  this._localTracks = {}
+  this._localTracksPendingRemove = {}
+  this._remoteStreamIds = {}
+  this._remoteTrackIds = {}
+  this._endRemoteTracks()
+  try { channel.close() } catch (err) {}
+  try { connection.close() } catch (err) {}
+  if (connected) {
+    this.emit('disconnect')
+  }
 }
 
-SimplerPeer.prototype._onSetLocalAnswer = function () {
-  // workaround for FF not triggering track.onended
-  for (var id in this.remoteStreams) {
-    var stream = this.remoteStreams[id]
-    stream.getTracks().forEach(track => {
-      if (track.readyState !== undefined) return
-      if (!this.remoteTrackIds[track.id]) {
-        track.onended && track.onended()
-        track.dispatchEvent(new window.Event('ended'))
-      }
+SimplerPeer.prototype._receiveOffer = function (offer) {
+  if (!this.connection ||
+       this.initiator ||
+       this._remoteOffer) {
+    this.emit('error', new Error('invalid state'))
+    return
+  }
+  offer = new webrtc.RTCSessionDescription(offer)
+  this._debug('receiveOffer', offer)
+  this._remoteOffer = offer
+  var connection = this.connection
+  var self = this
+  connection.setRemoteDescription(offer, function () {
+    if (connection !== self.connection) return
+    connection.createAnswer(function (answer) {
+      if (connection !== self.connection) return
+      connection.setLocalDescription(answer, function () {
+        if (connection !== self.connection) return
+        self.emit('signal', answer)
+      }, function (err) {
+        if (connection !== self.connection) return
+        self._destroyConnection()
+        self.emit('error', err)
+      })
+    }, function (err) {
+      if (connection !== self.connection) return
+      self._destroyConnection()
+      self.emit('error', err)
     })
-    if (!this.remoteStreamIds[id]) {
-      delete this.remoteStreams[id]
-    }
-  }
-
-  delete this._localOffer
-  this._checkNegotiationNeeded()
+  }, function (err) {
+    if (connection !== self.connection) return
+    self._destroyConnection()
+    self.emit('error', err)
+  })
 }
 
-SimplerPeer.prototype._processRemoteAnswer = function (answer) {
-  if (!this._localOffer) return
+SimplerPeer.prototype._receiveAnswer = function (answer) {
+  if (!this.connection ||
+      !this.initiator ||
+      !this._localOffer ||
+       this._remoteAnswer) {
+    this.emit('error', new Error('invalid state'))
+    return
+  }
+  answer = new webrtc.RTCSessionDescription(answer)
+  this._debug('receiveAnswer', answer)
+  this._remoteAnswer = answer
+  var connection = this.connection
+  var self = this
+  connection.setRemoteDescription(answer, function () {
+    // noop
+  }, function (err) {
+    if (connection !== self.connection) return
+    self._destroyConnection()
+    self.emit('error', err)
+  })
+}
 
-  debug(this.id, 'got answer', answer)
+SimplerPeer.prototype._receiveIceCandidate = function (candidate) {
+  if (!this.connection) return
+  candidate = new webrtc.RTCIceCandidate(candidate)
+  var connection = this.connection
+  var self = this
+  connection.addIceCandidate(candidate, function () {
+    if (connection !== self.connection) return
+    self._debug('receiveIceCandidate', candidate)
+  }, function (err) {
+    if (connection !== self.connection) return
+    self.emit('error', err)
+  })
+}
 
-  this._remoteAnswer = new webrtc.RTCSessionDescription(answer)
-
-  if (this.connected) {
-    this.connection.setLocalDescription(
-      this._localOffer,
-      this._onSetLocalDescription,
-      this._onError
-    )
+SimplerPeer.prototype._onicecandidate = function (evt) {
+  if (evt.target !== this.connection || this._icecomplete) return
+  if (evt.candidate) {
+    this.emit('signal', evt.candidate)
   } else {
-    this._onSetLocalDescription()
+    this._onicecomplete()
   }
 }
 
-SimplerPeer.prototype._onSetLocalDescription = function () {
-  debug(this.id, 'onSetLocalDescription')
-
-  if (this._remoteAnswer) {
-    var answer = this._remoteAnswer
-    delete this._remoteAnswer
-    this.connection.setRemoteDescription(
-      answer,
-      this._onSetRemoteAnswer,
-      this._onError
-    )
-  } else if (this.trickle) {
-    this.emit('signal', this.connection.localDescription)
-  }
-}
-
-SimplerPeer.prototype._onSetRemoteAnswer = function () {
-  delete this._localOffer
-  this._checkNegotiationNeeded()
-}
-
-SimplerPeer.prototype._checkNegotiationNeeded = function () {
-  if (this.negotiationNeeded) {
-    delete this.negotiationNeeded
-    this._onNegotiationNeeded()
-  }
-}
-
-SimplerPeer.prototype._processRemoteIceCandidate = function (candidate) {
-  debug(this.id, 'got candidate', candidate)
-
-  this.connection.addIceCandidate(
-    new webrtc.RTCIceCandidate(candidate),
-    noop,
-    this._onError
-  )
-}
-
-SimplerPeer.prototype._onIceCandidate = function (evt) {
-  if (this.closed) return
-
-  debug(this.id, 'onIceCandidate', evt)
-
-  if (this.trickle) {
-    if (evt.candidate) {
-      this.emit('signal', evt.candidate)
-    }
-  } else {
-    clearTimeout(this._iceGatheringTimeout)
-    if (!evt.candidate) {
-      this._onIceComplete()
-    } else {
-      this._iceGatheringTimeout = setTimeout(this._onIceComplete, 250)
-    }
-  }
-}
-
-SimplerPeer.prototype._onIceConnectionStateChange = function (evt) {
-  if (this.closed) return
-
+SimplerPeer.prototype._oniceconnectionstatechange = function (evt) {
+  if (evt.target !== this.connection) return
   var state = this.connection.iceConnectionState
-
-  debug(this.id, 'statechange', state)
-
-  this.emit('statechange', state)
-
-  if (state === 'completed' || state === 'connected') {
-    this._onIceComplete()
-  } else if (state === 'failed' || state === 'closed') {
-    this.close()
+  this._debug('oniceconnectionstatechange', state)
+  if (state === 'failed' || state === 'closed') {
+    this._destroyConnection()
   }
 }
 
-SimplerPeer.prototype._onIceComplete = function () {
-  if (this.closed) return
-
-  this.connection.onicecandidate = null
-  this._onIceComplete = noop
-
-  debug(this.id, 'onIceComplete')
-
-  if (!this.trickle) {
-    this.emit('signal', this.connection.localDescription)
-  }
+SimplerPeer.prototype._onicecomplete = function () {
+  if (this._icecomplete) return
+  this._icecomplete = true
+  this._debug('onicecomplete')
+  this.emit('icecomplete')
 }
 
-SimplerPeer.prototype._onDataChannel = function (evt) {
-  if (this.closed) return
-
-  var channel = new DataChannel(evt.channel)
-  if (channel.label === 'internal' && !this._channel) {
-    debug(this.id, 'onDataChannel (internal)', channel)
-
-    this._channel = channel
-    this._channel.on('open', this._onChannelOpen)
+SimplerPeer.prototype._ondatachannel = function (evt) {
+  if (evt.target !== this.connection) return
+  if (this._channel) {
+    this.emit('datachannel', new DataChannel(evt.channel))
   } else {
-    debug(this.id, 'onDataChannel', channel)
-
-    this.emit('datachannel', channel)
+    this._debug('got channel')
+    this._channel = this._setupChannel(evt.channel)
   }
 }
 
-SimplerPeer.prototype._onChannelOpen = function () {
-  if (this.closed) return
+SimplerPeer.prototype._setupChannel = function (channel) {
+  channel.binaryType = 'arraybuffer'
+  channel.onopen = this._onchannelopen
+  channel.onclose = this._onchannelclose
+  channel.onmessage = this._onchannelmessage
+  return channel
+}
 
-  debug(this.id, 'connect')
-
-  this._channel.on('close', this.close)
-  this._channel.on('message', this._onChannelMessage)
+SimplerPeer.prototype._onchannelopen = function (evt) {
+  if (evt.target !== this._channel) return
+  delete this._localOffer
+  delete this._remoteOffer
+  delete this._remoteAnswer
   this.connected = true
+  this._debug('connect')
   this.emit('connect')
+  this._processPendingTracks()
 }
 
-SimplerPeer.prototype._onChannelMessage = function (evt) {
-  if (this.closed) return
-
-  debug(this.id, 'onChannelMessage', evt.data)
-
-  this.signal(evt.data)
+SimplerPeer.prototype._onchannelclose = function (evt) {
+  if (evt.target !== this._channel) return
+  this._debug('onchannelclose')
+  this._destroyConnection()
 }
 
-SimplerPeer.prototype._onTrack = function (evt) {
-  if (this.closed) return
-
-  debug(this.id, 'onTrack', evt)
-
+SimplerPeer.prototype._ontrack = function (evt) {
+  if (evt.target !== this.connection) return
+  this._debug('ontrack', evt)
   if (this.connection.addTrack) {
     var remoteStream = evt.streams[0]
-    this.remoteStreams[remoteStream.id] = remoteStream
+    this._remoteStreams[remoteStream.id] = remoteStream
   } else {
     evt = {
       track: evt.stream.getTracks()[0],
       streams: [ evt.stream ]
     }
   }
-
   this.emit('track', evt)
 }
 
-SimplerPeer.prototype._onError = function (err) {
-  debug(this.id, 'error', err)
-
-  this.emit('error', err)
+SimplerPeer.prototype._onnegotiationneeded = function (evt) {
+  if (!this.connected) return
+  if (this._negotiating) {
+    this._negotiationNeeded = true
+    return
+  }
+  var connection = this.connection
+  clearTimeout(this._negotiationNeededTimeout)
+  var self = this
+  this._negotiationNeededTimeout = setTimeout(function () {
+    if (connection !== self.connection) return
+    self._negotiate()
+  }, 50)
 }
 
-function debug () {
-  // console.log.apply(console, arguments)
+SimplerPeer.prototype._negotiate = function () {
+  this._debug('onnegotiationneeded')
+  delete this._negotiationNeeded
+  this._negotiating = true
+  var connection = this.connection
+  var self = this
+  connection.createOffer(function (offer) {
+    if (connection !== self.connection) return
+    self._localOffer = offer
+    try {
+      self._channel.send(
+        JSON.stringify(offer)
+      )
+    } catch (err) {}
+  }, function (err) {
+    if (connection !== self.connection) return
+    self._finishNegotiation(err)
+  })
 }
 
-function noop () {}
+SimplerPeer.prototype._onchannelmessage = function (evt) {
+  if (evt.target !== this._channel) return
+  this._debug('got message', evt.data)
+  var message = JSON.parse(evt.data)
+  switch (message.type) {
+    case 'offer':
+      this._handleRenegotiationOffer(message)
+      break
+    case 'answer':
+      this._handleRenegotiationAnswer(message)
+      break
+  }
+}
+
+SimplerPeer.prototype._handleRenegotiationOffer = function (offer) {
+  if (this._localOffer) {
+    if (this.initiator) {
+      return
+    } else {
+      delete this._localOffer
+      this._negotiationNeeded = true
+    }
+  }
+  offer = new webrtc.RTCSessionDescription(offer)
+  var connection = this.connection
+  var self = this
+  connection.setRemoteDescription(offer, function () {
+    if (connection !== self.connection) return
+    connection.createAnswer(function (answer) {
+      if (connection !== self.connection) return
+      try {
+        self._channel.send(
+          JSON.stringify(answer)
+        )
+      } catch (err) {
+        return
+      }
+      connection.setLocalDescription(answer, function () {
+        if (connection !== self.connection) return
+        self._finishNegotiation(null, offer)
+      }, function (err) {
+        if (connection !== self.connection) return
+        self._finishNegotiation(err)
+      })
+    }, function (err) {
+      if (connection !== self.connection) return
+      self._finishNegotiation(err)
+    })
+  }, function (err) {
+    if (connection !== self.connection) return
+    self._finishNegotiation(err)
+  })
+}
+
+SimplerPeer.prototype._handleRenegotiationAnswer = function (answer) {
+  answer = new webrtc.RTCSessionDescription(answer)
+  var connection = this.connection
+  var self = this
+  connection.setLocalDescription(this._localOffer, function () {
+    if (connection !== self.connection) return
+    connection.setRemoteDescription(answer, function () {
+      if (connection !== self.connection) return
+      self._finishNegotiation()
+    }, function (err) {
+      if (connection !== self.connection) return
+      self._finishNegotiation(err)
+    })
+  }, function (err) {
+    if (connection !== self.connection) return
+    self._finishNegotiation(err)
+  })
+}
+
+SimplerPeer.prototype._finishNegotiation = function (err, offer) {
+  delete this._negotiating
+  delete this._localOffer
+  if (err) {
+    this.emit('error', err)
+  } else if (offer) {
+    this._remoteStreamIds = {}
+    this._remoteTrackIds = {}
+    var self = this
+    offer.sdp.split('msid:').slice(1).forEach(function (line) {
+      var parts = line.split(' ')
+      var streamId = parts[0]
+      var trackId = parts[1].split(/\r|\n/)[0]
+      self._remoteStreamIds[streamId] = true
+      self._remoteTrackIds[trackId] = true
+    })
+    this._endRemoteTracks()
+  }
+  this._processPendingTracks()
+  this._checkNegotiationNeeded()
+}
+
+SimplerPeer.prototype._endRemoteTracks = function () {
+  for (var id in this._remoteStreams) {
+    var stream = this._remoteStreams[id]
+    var needsRemoval = !this._remoteStreamIds[id]
+    if (needsRemoval) {
+      delete this._remoteStreams[id]
+    }
+    var self = this
+    stream.getTracks().forEach(function (track) {
+      if (track.readyState !== undefined) return
+      if (!self._remoteTrackIds[track.id]) {
+        track.onended && track.onended()
+        track.dispatchEvent(new window.Event('ended'))
+      }
+    })
+    if (needsRemoval) {
+      if (stream.readyState !== undefined) return
+      stream.onended && stream.onended()
+      stream.dispatchEvent(new window.Event('ended'))
+    }
+  }
+}
+
+SimplerPeer.prototype._processPendingTracks = function () {
+  for (var id in this._localTracksPendingRemove) {
+    var track = this._localTracksPendingRemove[id]
+    delete this._localTracksPendingRemove[id]
+    this.removeTrack(track)
+  }
+  for (id in this._localTracksPendingAdd) {
+    track = this._localTracksPendingAdd[id]
+    delete this._localTracksPendingAdd[id]
+    this.addTrack(track)
+  }
+}
+
+SimplerPeer.prototype._checkNegotiationNeeded = function () {
+  if (!this._negotiationNeeded) return
+  this._negotiate()
+}
+
+SimplerPeer.prototype._debug = function () {
+  // console.log.apply(console, [ this.id ].concat(Array.from(arguments)))
+}
