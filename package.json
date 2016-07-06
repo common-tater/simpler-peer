@@ -3,7 +3,8 @@
   "version": "1.2.0",
   "description": "A fork of Feross's simple-peer that doesn't touch node streams or Buffer",
   "scripts": {
-    "test": "standard && zuul --ui tape --no-coverage --local 7357 ./test.js"
+    "test": "watchify test.js -o test-build.js",
+    "lint": "standard index.js data-channel.js test.js"
   },
   "dependencies": {
     "get-browser-rtc": "^1.0.2",
@@ -11,9 +12,9 @@
   },
   "devDependencies": {
     "standard": "^7.1.2",
-    "tape": "^4.0.1",
-    "zuul": "^3.2.0"
+    "tape": "^4.6.0",
+    "watchify": "^3.7.0"
   },
   "author": "jesse.tane@gmail.com",
-  "license": "ISC"
+  "license": "MIT"
 }
