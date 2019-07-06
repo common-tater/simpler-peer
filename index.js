@@ -21,8 +21,8 @@ function SimplerPeer (opts) {
   this._opts = {
     iceServers: [
       {
-        url: 'stun:23.21.150.121',
-        urls: 'stun:23.21.150.121'
+        url: 'stun:217.10.68.152',
+        urls: 'stun:217.10.68.152'
       }
     ]
   }
