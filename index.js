@@ -70,18 +70,18 @@ SimplerPeer.prototype.connect = function (remoteId) {
       connection.createDataChannel('internal')
     )
     var self = this
-    connection.createOffer(function (offer) {
+    connection.createOffer().then(function (offer) {
       if (connection !== self.connection) return
-      connection.setLocalDescription(offer, function () {
+      connection.setLocalDescription(offer).then(function () {
         if (connection !== self.connection) return
         self._localOffer = offer
         self.emit('signal', offer)
-      }, function (err) {
+      }).catch(function (err) {
         if (connection !== self.connection) return
         self._destroyConnection()
         self.emit('error', err)
       })
-    }, function (err) {
+    }).catch(function (err) {
       if (connection !== self.connection) return
       self._destroyConnection()
       self.emit('error', err)
@@ -221,24 +221,24 @@ SimplerPeer.prototype._receiveOffer = function (offer) {
   this._remoteOffer = offer
   var connection = this.connection
   var self = this
-  connection.setRemoteDescription(offer, function () {
+  connection.setRemoteDescription(offer).then(function () {
     if (connection !== self.connection) return
-    connection.createAnswer(function (answer) {
+    connection.createAnswer().then(function (answer) {
       if (connection !== self.connection) return
-      connection.setLocalDescription(answer, function () {
+      connection.setLocalDescription(answer).then(function () {
         if (connection !== self.connection) return
         self.emit('signal', answer)
-      }, function (err) {
+      }).catch(function (err) {
         if (connection !== self.connection) return
         self._destroyConnection()
         self.emit('error', err)
       })
-    }, function (err) {
+    }).catch(function (err) {
       if (connection !== self.connection) return
       self._destroyConnection()
       self.emit('error', err)
     })
-  }, function (err) {
+  }).catch(function (err) {
     if (connection !== self.connection) return
     self._destroyConnection()
     self.emit('error', err)
@@ -258,9 +258,9 @@ SimplerPeer.prototype._receiveAnswer = function (answer) {
   this._remoteAnswer = answer
   var connection = this.connection
   var self = this
-  connection.setRemoteDescription(answer, function () {
+  connection.setRemoteDescription(answer).then(function () {
     // noop
-  }, function (err) {
+  }).catch(function (err) {
     if (connection !== self.connection) return
     self._destroyConnection()
     self.emit('error', err)
@@ -272,17 +272,17 @@ SimplerPeer.prototype._receiveIceCandidate = function (candidate) {
   candidate = new webrtc.RTCIceCandidate(candidate)
   var connection = this.connection
   var self = this
-  connection.addIceCandidate(candidate, function () {
+  connection.addIceCandidate(candidate).then(function () {
     if (connection !== self.connection) return
     self._debug('receiveIceCandidate', candidate)
-  }, function (err) {
+  }).catch(function (err) {
     if (connection !== self.connection) return
     self.emit('error', err)
   })
 }
 
 SimplerPeer.prototype._onicecandidate = function (evt) {
-  if (evt.target !== this.connection || this._icecomplete) return
+  if (evt.target.localDescription.sdp !== this.connection.localDescription.sdp || this._icecomplete) return
   if (evt.candidate) {
     this.emit('signal', evt.candidate)
   } else {
@@ -291,7 +291,7 @@ SimplerPeer.prototype._onicecandidate = function (evt) {
 }
 
 SimplerPeer.prototype._oniceconnectionstatechange = function (evt) {
-  if (evt.target !== this.connection) return
+  if (evt.target.localDescription.sdp !== this.connection.localDescription.sdp) return
   var state = this.connection.iceConnectionState
   this._debug('oniceconnectionstatechange', state)
   if (state === 'failed' || state === 'closed') {
@@ -307,7 +307,7 @@ SimplerPeer.prototype._onicecomplete = function () {
 }
 
 SimplerPeer.prototype._ondatachannel = function (evt) {
-  if (evt.target !== this.connection) return
+  if (evt.target.localDescription.sdp !== this.connection.localDescription.sdp) return
   if (this._channel) {
     this.emit('datachannel', new DataChannel(evt.channel))
   } else {
@@ -342,7 +342,7 @@ SimplerPeer.prototype._onchannelclose = function (evt) {
 }
 
 SimplerPeer.prototype._ontrack = function (evt) {
-  if (evt.target !== this.connection) return
+  if (evt.target.localDescription.sdp !== this.connection.localDescription.sdp) return
   this._debug('ontrack', evt)
   if (this.connection.addTrack) {
     var remoteStream = evt.streams[0]
@@ -377,7 +377,7 @@ SimplerPeer.prototype._negotiate = function () {
   this._negotiating = true
   var connection = this.connection
   var self = this
-  connection.createOffer(function (offer) {
+  connection.createOffer().then(function (offer) {
     if (connection !== self.connection) return
     self._localOffer = offer
     try {
@@ -385,7 +385,7 @@ SimplerPeer.prototype._negotiate = function () {
         JSON.stringify(offer)
       )
     } catch (err) {}
-  }, function (err) {
+  }).catch(function (err) {
     if (connection !== self.connection) return
     self._finishNegotiation(err)
   })
@@ -417,9 +417,9 @@ SimplerPeer.prototype._handleRenegotiationOffer = function (offer) {
   offer = new webrtc.RTCSessionDescription(offer)
   var connection = this.connection
   var self = this
-  connection.setRemoteDescription(offer, function () {
+  connection.setRemoteDescription(offer).then(function () {
     if (connection !== self.connection) return
-    connection.createAnswer(function (answer) {
+    connection.createAnswer().then(function (answer) {
       if (connection !== self.connection) return
       try {
         self._channel.send(
@@ -428,18 +428,18 @@ SimplerPeer.prototype._handleRenegotiationOffer = function (offer) {
       } catch (err) {
         return
       }
-      connection.setLocalDescription(answer, function () {
+      connection.setLocalDescription(answer).then(function () {
         if (connection !== self.connection) return
         self._finishNegotiation(null, offer)
-      }, function (err) {
+      }).catch(function (err) {
         if (connection !== self.connection) return
         self._finishNegotiation(err)
       })
-    }, function (err) {
+    }).catch(function (err) {
       if (connection !== self.connection) return
       self._finishNegotiation(err)
     })
-  }, function (err) {
+  }).catch(function (err) {
     if (connection !== self.connection) return
     self._finishNegotiation(err)
   })
@@ -449,16 +449,16 @@ SimplerPeer.prototype._handleRenegotiationAnswer = function (answer) {
   answer = new webrtc.RTCSessionDescription(answer)
   var connection = this.connection
   var self = this
-  connection.setLocalDescription(this._localOffer, function () {
+  connection.setLocalDescription(this._localOffer).then(function () {
     if (connection !== self.connection) return
-    connection.setRemoteDescription(answer, function () {
+    connection.setRemoteDescription(answer).then(function () {
       if (connection !== self.connection) return
       self._finishNegotiation()
-    }, function (err) {
+    }).catch(function (err) {
       if (connection !== self.connection) return
       self._finishNegotiation(err)
     })
-  }, function (err) {
+  }).catch(function (err) {
     if (connection !== self.connection) return
     self._finishNegotiation(err)
   })
