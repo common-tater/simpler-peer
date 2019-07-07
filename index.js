@@ -52,6 +52,7 @@ function SimplerPeer (opts) {
   this._remoteStreams = {}
   this._remoteStreamIds = {}
   this._remoteTrackIds = {}
+  this._senders = {}
 }
 
 // public API
@@ -131,7 +132,7 @@ SimplerPeer.prototype.addTrack = function (track, stream) {
     this._localTracks[track.id] = track
   }
   if (this.connection.addTrack) {
-    track._sender = this.connection.addTrack(
+    this._senders[track.id] = this.connection.addTrack(
       track,
       stream
     )
@@ -156,7 +157,8 @@ SimplerPeer.prototype.removeTrack = function (track) {
     delete this._localTracks[track.id]
   }
   if (this.connection.removeTrack) {
-    this.connection.removeTrack(track._sender)
+    this.connection.removeTrack(this._senders[track.id])
+    delete this._senders[track.id]
   } else {
     this.connection.removeStream(track._stream)
   }
